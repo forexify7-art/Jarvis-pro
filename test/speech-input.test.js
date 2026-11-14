@@ -106,7 +106,7 @@ test('resolves standard and Android-prefixed recognition with the selected local
 
 test('confirms microphone permission and refreshes the status when recognition starts', async () => {
   const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
-  const startHandler = app.match(/recognition\.onstart = \(\) => \{([\s\S]*?)\n  \};/)?.[1] || '';
+  const startHandler = app.match(/recognition\.onstart = \(\) => \{([\s\S]*?)\n {2}\};/)?.[1] || '';
 
   assert.match(startHandler, /state\.microphonePermission = 'granted'/);
   assert.match(startHandler, /renderMicrophoneStatus\(\)/);

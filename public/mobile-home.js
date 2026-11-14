@@ -169,8 +169,7 @@ export function createMobileHome({
       if (messageInput) messageInput.value = transcript.trim();
       if (final) submitTranscript(transcript.trim());
     };
-    recognition.onerror = (event) => {
-      const denied = ['not-allowed', 'service-not-allowed'].includes(event.error);
+    recognition.onerror = () => {
       stopAudioMeter();
     };
     recognition.onend = () => {

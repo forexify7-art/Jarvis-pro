@@ -215,7 +215,7 @@ async function handleBrowserResearch(request, response) {
     throw Object.assign(new Error('Browser Research service is not running. Start it with: python3 browser/jarvis_browser_service.py'), { status: 503 });
   }
 
-  let data = null;
+  let data;
   try {
     data = await upstream.json();
   } catch {
@@ -1440,7 +1440,7 @@ async function handleSearch(url, response) {
       return;
     }
   } catch {
-    results = [];
+    // Continue to Wikipedia when DuckDuckGo is unavailable.
   }
 
   try {

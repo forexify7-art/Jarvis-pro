@@ -280,7 +280,7 @@ test('dynamic messages round-trip exactly between English and Hindi', () => {
 });
 
 test('planner user text and conversation content are protected while placeholders localize', () => {
-  const { document, body } = createDocument();
+  const { body } = createDocument();
   const title = createElement('P', {}, ['planner-item-content']).append(createText('Settings'));
   const plannerItem = createElement('LI', {}, ['planner-item']).append(title);
   const transcript = createElement('DIV', {}, ['transcript']).append(createText('Settings'));

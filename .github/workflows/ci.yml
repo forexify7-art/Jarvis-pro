@@ -14,31 +14,35 @@ concurrency:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    name: Linux quality checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
       - name: Install Node dependencies
         run: npm ci
 
+      - name: Lint JavaScript
+        run: npm run lint
+
+      - name: Audit Node dependencies
+        run: npm audit --audit-level=moderate
+
       - name: Run Python tests
         run: python -m unittest discover -s test -p '*_test.py' -v
-
-      - name: Run dependency audit
-        run: npm audit --audit-level=moderate
 
       - name: Build and check JavaScript
         run: npm run check
@@ -54,22 +58,68 @@ jobs:
 
       - name: Upload browser traces on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-results
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7
 
+  linux-tauri-build:
+    name: Linux Tauri build and Rust audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux Tauri build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            libssl-dev \
+            librsvg2-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            patchelf
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Generate Rust dependency lockfile
+        run: cargo generate-lockfile --manifest-path src-tauri/Cargo.toml
+
+      - name: Install Rust dependency auditor
+        run: cargo install cargo-audit --locked
+
+      - name: Audit Rust dependencies
+        run: cargo audit --file src-tauri/Cargo.lock
+
+      - name: Build Linux Tauri application
+        run: npm run tauri:build:linux:check
+
   windows-installer:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -90,7 +140,7 @@ jobs:
           Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256
 
       - name: Upload unsigned Windows installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: JARVIS-Setup-x64.exe
           path: dist-desktop/JARVIS-Setup-x64.exe

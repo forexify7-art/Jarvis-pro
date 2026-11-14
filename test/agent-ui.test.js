@@ -31,7 +31,7 @@ test('agent browser research uses the authorized read-only client and cancellati
   assert.match(app, /import \{ researchBrowserPage \} from '\.\/browser-agent\.js'/);
   assert.match(html, /id="browser-research-open"/);
   assert.match(html, /id="browser-research-dialog"/);
-  const handler = app.match(/'browser-read-page': async \(\{ url, question \}, \{ signal \}\) => \{([\s\S]*?)\n    \},/);
+  const handler = app.match(/'browser-read-page':\s+async \(\{ url, question \}, \{ signal \}\) => \{([\s\S]*?)\n {4}\},/);
   assert.ok(handler, 'agent handler is connected for planned browser-read-page steps');
   assert.match(handler[1], /researchBrowserPage\(\{/);
   assert.match(handler[1], /headers: apiHeaders\(true\)/);

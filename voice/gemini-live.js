@@ -332,7 +332,9 @@ export class GeminiLiveVoice {
   #stopPlayback(session) {
     session.turnComplete = false;
     for (const source of session.playbackSources) {
-      try { source.stop(); } catch {}
+      try { source.stop(); } catch {
+        // Audio sources may already have stopped between playback and cleanup.
+      }
     }
     session.playbackSources.clear();
     session.nextPlaybackTime = this.outputContext?.currentTime || 0;
@@ -373,9 +375,11 @@ export class GeminiLiveVoice {
     if (session.inputStream) {
       for (const track of session.inputStream.getTracks()) track.stop();
     }
-    session.inputContext?.close().catch(() => {});
+    session.inputContext?.close().catch((error) => console.warn('Unable to close voice input audio context.', error));
     if (closeSocket && session.socket.readyState < 2) {
-      try { session.socket.close(1000, 'Session finished'); } catch {}
+      try { session.socket.close(1000, 'Session finished'); } catch {
+        // The socket may close between the readyState check and this call.
+      }
     }
     if (this.activeSession === session) this.activeSession = null;
   }

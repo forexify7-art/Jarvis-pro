@@ -433,7 +433,6 @@ const ENGLISH_TO_HINDI = Object.freeze({
   'Microphone access and available voices are controlled by your browser and operating system. This app cannot control your computer or phone outside the permissions your browser provides.': 'माइक्रोफ़ोन एक्सेस और उपलब्ध आवाज़ें आपके ब्राउज़र व ऑपरेटिंग सिस्टम द्वारा नियंत्रित होती हैं। ब्राउज़र की अनुमतियों से बाहर यह ऐप आपके कंप्यूटर या फ़ोन को नियंत्रित नहीं कर सकता।',
   'Checking current provider…': 'मौजूदा प्रदाता जाँचा जा रहा है…',
   'Searching available web sources...': 'उपलब्ध वेब स्रोत खोजे जा रहे हैं…',
-  'No source-backed headlines were returned.': 'स्रोतों से जुड़ी कोई सुर्ख़ी नहीं मिली।',
   'Search is limited to text files attached in this browser\'s saved conversation history.': 'खोज इस ब्राउज़र के सहेजे गए बातचीत इतिहास में संलग्न text फ़ाइलों तक सीमित है।',
   'Searching saved files…': 'सहेजी गई फ़ाइलें खोजी जा रही हैं…',
   'No matching text found in saved attachments.': 'सहेजे गए अटैचमेंट में मेल खाता टेक्स्ट नहीं मिला।',

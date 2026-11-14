@@ -83,7 +83,7 @@ test('exposes Gemini as a settings option and validates configuration without st
 
   const invalidModel = await postJson('/api/settings/ai', {
     provider: 'gemini',
-    model: 'models\/gemini-test-model',
+    model: 'models/gemini-test-model',
     apiKey: 'test-only-invalid-model-secret',
   });
   assert.equal(invalidModel.status, 400);

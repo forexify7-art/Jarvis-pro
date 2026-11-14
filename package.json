@@ -6,6 +6,7 @@
   "type": "module",
   "main": "desktop/main.js",
   "scripts": {
+    "lint": "eslint .",
     "start": "node --env-file-if-exists=.env server.js",
     "desktop": "electron .",
     "desktop:dist": "electron-builder --win nsis --publish never",
@@ -28,6 +29,7 @@
     "tauri": "npx --yes @tauri-apps/cli@2",
     "tauri:dev": "npx --yes @tauri-apps/cli@2 dev",
     "tauri:build": "npx --yes @tauri-apps/cli@2 build",
+    "tauri:build:linux:check": "npx --yes @tauri-apps/cli@2 build --ci --no-bundle",
     "tauri:android:init": "npx --yes @tauri-apps/cli@2 android init && node scripts/tauri-android-setup.mjs",
     "tauri:android:build": "npx --yes @tauri-apps/cli@2 android build --apk",
     "tauri:android:build:debug": "npx --yes @tauri-apps/cli@2 android build --apk --debug --target aarch64 --ci"
@@ -40,18 +42,20 @@
     "three": "^0.186.1"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.64.1",
     "electron": "^45.0.0",
     "electron-builder": "^26.18.0",
-    "esbuild": "^0.28.2"
+    "esbuild": "^0.28.2",
+    "eslint": "^10.15.0",
+    "globals": "^17.14.0"
   },
   "overrides": {
-    "electron-builder": {
-      "app-builder-lib": {
-        "@electron/universal": {
-          "minimatch": "^11.0.1"
-        }
-      }
+    "app-builder-lib@26.18.0": {
+      "minimatch": "^11.0.1"
+    },
+    "@electron/universal@2.0.3": {
+      "minimatch": "^11.0.1"
     }
   },
   "build": {

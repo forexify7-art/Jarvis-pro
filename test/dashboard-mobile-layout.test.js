@@ -60,8 +60,6 @@ test('mobile Home scrolls and keeps the command bar above navigation', () => {
   assert.match(mobileCascade.get('bottom'), /60px/);
   assert.equal(mobileCascade.get('z-index'), '8');
 
-  const desktopRules = commandRules.filter((rule) => rule.media.length === 0);
-  const desktopCascade = readDeclarations(desktopRules);
   assert.doesNotMatch(styles.slice(0, styles.indexOf('@media (max-width: 780px)')), /body\.new-interface \.dashboard-commandbar\s*\{[^}]*position:\s*(sticky|fixed)/);
 
   const mobileNavigation = rules.filter((rule) => rule.selector === '.mobile-nav');

@@ -2719,7 +2719,9 @@ function stopSpeechOutput() {
   geminiLiveVoice.stopAudioPlayback();
   try {
     window.speechSynthesis.cancel();
-  } catch {}
+  } catch (error) {
+    console.warn('Unable to cancel browser speech synthesis.', error);
+  }
   if (state.assistantMode === 'speaking') setAssistantState('', 'SYSTEM STANDBY');
   resumeWakeWordDetection();
 }
@@ -4786,7 +4788,7 @@ function selectNavigation(destination) {
   document.querySelectorAll('[data-nav]').forEach((item) => item.classList.toggle('is-current', item.dataset.nav === destination));
 }
 
-function setWorkspaceView(view, { remember = true } = {}) {
+function setWorkspaceView() {
   state.workspaceView = 'dashboard';
   elements.dashboardLayout.hidden = false;
   elements.conversationView.hidden = true;

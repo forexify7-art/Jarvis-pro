@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
-import { dampMouthOpening, estimateMouthCue, getMouthShape } from './avatar-cues.js';
+import { dampMouthOpening } from './avatar-cues.js';
 import { applyHologramMaterial, removeHologramMaterial, createHologramScene } from './hologram-scene.js';
 
 export { applySpeechBoundaryCue, dampMouthOpening, estimateAudioMouthOpening, estimateMouthCue, getMouthShape } from './avatar-cues.js';
@@ -1071,7 +1071,7 @@ export function createBuiltInAvatar(referenceImage) {
   const lips = new THREE.Group();
   lips.name = 'lips';
   lips.position.set(0, -0.32, 0.279);
-  const upperLip = addCurve(lips, 'upper-lip', lipMaterial, [
+  addCurve(lips, 'upper-lip', lipMaterial, [
     [-0.064, 0, 0],
     [-0.039, 0.008, 0.001],
     [-0.016, 0.006, 0.002],
@@ -1143,7 +1143,6 @@ export function initializeAvatar3d({
   let mouthValue = 0;
   let targetMouthValue = 0;
   let blinkStartedAt = 0;
-  let activeTargets = [];
   let headNode = null;
   let headBaseRotation = new THREE.Euler();
   let modelBasePosition = new THREE.Vector3();
@@ -1172,7 +1171,6 @@ export function initializeAvatar3d({
   let speechEnergy = 0;
   let speechNodStartedAt = -Infinity;
   let speechNodDuration = AVATAR_IDLE_LIFE_CONFIG.speechNodDurationMinMs;
-  let browValue = 0;
   let idleLifeTime = 0;
   let stateMix = { idle: 1, listening: 0, thinking: 0, speaking: 0, offline: 0 };
   let targetStateMix = { idle: 1, listening: 0, thinking: 0, speaking: 0, offline: 0 };
@@ -1184,8 +1182,6 @@ export function initializeAvatar3d({
   let saccadeY = 0;
   let saccadeTargetX = 0;
   let saccadeTargetY = 0;
-  let thinkingGazeTimer = 0;
-  let breathingBaseScales = [];
   let torsoBones = [];
   let loadRequestId = 0;
   const reducedMotionQuery = globalThis.window?.matchMedia?.('(prefers-reduced-motion: reduce)');
@@ -1279,7 +1275,6 @@ export function initializeAvatar3d({
     targetMouthValue = 0;
     blinkStartedAt = 0;
     lastFrameTime = 0;
-    activeTargets = [];
     headNode = null;
     eyeNodes = [];
     eyeBaseRotations = [];
@@ -1645,7 +1640,7 @@ export function initializeAvatar3d({
       const root = gltf.scene;
       const vrm = gltf.userData?.vrm || null;
       const rig = inspectAvatarRig(root);
-      const { morphTargets, mouthTargets: newMouthTargets } = rig;
+      const { mouthTargets: newMouthTargets } = rig;
       const expressionManager = vrm?.expressionManager;
       const hasVrmMouth = ['aa', 'ee', 'ih', 'oh', 'ou'].some((name) => expressionManager?.getExpression(name));
       if (!newMouthTargets.length && !hasVrmMouth) {
@@ -1680,7 +1675,6 @@ export function initializeAvatar3d({
       scene.add(modelRoot);
       configureIdleLifeBones();
       attachHologram();
-      activeTargets = morphTargets;
       root.traverse((object) => {
         if (!headNode && /^(?:head|neck)(?:[_ .-]|$)/i.test(object.name)) headNode = object;
       });
@@ -1741,9 +1735,7 @@ export function initializeAvatar3d({
     }
     try {
       const { root, rig } = createBuiltInAvatar(referenceImage);
-      const face = root.getObjectByName('face');
       const bounds = new THREE.Box3().setFromObject(root);
-      const size = bounds.getSize(new THREE.Vector3());
       const center = bounds.getCenter(new THREE.Vector3());
       disposeModel();
       configureRenderer();

@@ -10,7 +10,7 @@ test('configures a Windows NSIS installer without changing the web entry point',
   assert.equal(packageJson.scripts.start, 'node --env-file-if-exists=.env server.js');
   assert.equal(packageJson.main, 'desktop/main.js');
   assert.equal(packageJson.scripts.desktop, 'electron .');
-  assert.equal(packageJson.scripts['desktop:dist'], 'electron-builder --win nsis');
+  assert.equal(packageJson.scripts['desktop:dist'], 'electron-builder --win nsis --publish never');
   assert.equal(packageJson.scripts['predesktop:dist'], 'npm run build:avatar');
   assert.equal(packageJson.build.win.target, 'nsis');
   assert.equal(packageJson.build.nsis.createDesktopShortcut, true);

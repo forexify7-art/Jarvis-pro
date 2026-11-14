@@ -74,7 +74,7 @@ async function transitionMidpoint(page) {
 }
 
 async function resumeTransition(page) {
-  await page.locator('.portrait-blink-image').evaluate((image) => {
+  await page.locator('.portrait-blink-image').evaluate(() => {
     window.__portraitBlinkTransitionAnimation?.play();
   });
   return page.evaluate(() => window.__portraitBlinkTransitionEnd);

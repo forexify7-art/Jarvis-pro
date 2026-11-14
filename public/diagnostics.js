@@ -137,7 +137,7 @@ if (diagnosticsEnabled && diagnosticsPanel && diagnosticsOutput) {
       `User agent: ${navigator.userAgent || 'unavailable'}`,
       `SpeechRecognition: ${typeof window.SpeechRecognition === 'function' ? 'available' : 'not available'}`,
       `webkitSpeechRecognition: ${typeof window.webkitSpeechRecognition === 'function' ? 'available' : 'not available'}`,
-      `speechSynthesis: ${Boolean(window.speechSynthesis && typeof window.speechSynthesis.speak === 'function') ? 'available' : 'not available'}`,
+      `speechSynthesis: ${typeof window.speechSynthesis?.speak === 'function' ? 'available' : 'not available'}`,
       `TTS voices (${voices.length}): ${voices.length
         ? voices.map((voice) => `${voice.name || 'unnamed'} [${voice.lang || 'language unknown'}]`).join('; ')
         : 'none reported yet'}`,

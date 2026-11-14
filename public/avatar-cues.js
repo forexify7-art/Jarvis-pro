@@ -27,10 +27,10 @@ export function estimateMouthCue(word) {
   const normalized = word.toLocaleLowerCase().replace(/[^\p{L}\p{M}\p{N}]/gu, '');
   if (!normalized) return { opening: 0, viseme: 'aa' };
   if (!/^\p{Script=Latin}+$/u.test(normalized.replace(/\p{M}/gu, ''))) {
-    const viseme = /[उऊुू]/u.test(normalized) ? 'ou'
-      : /[ओऔोौ]/u.test(normalized) ? 'oh'
-        : /[इईिी]/u.test(normalized) ? 'ih'
-          : /[एऐेै]/u.test(normalized) ? 'ee' : 'aa';
+    const viseme = /(?:उ|ऊ|ु|ू)/u.test(normalized) ? 'ou'
+      : /(?:ओ|औ|ो|ौ)/u.test(normalized) ? 'oh'
+        : /(?:इ|ई|ि|ी)/u.test(normalized) ? 'ih'
+          : /(?:ए|ऐ|े|ै)/u.test(normalized) ? 'ee' : 'aa';
     return { opening: /[मबप]/.test(normalized[0]) ? 0.08 : 0.55, viseme };
   }
   if (/[mbp]/.test(normalized[0])) return { opening: 0.08, viseme: 'aa' };

@@ -53,7 +53,9 @@ export function primeSpeechSynthesis(synthesis, UtteranceConstructor, language, 
     const utterance = new UtteranceConstructor(' ');
     utterance.lang = getSpeechRecognitionLanguage(language);
     utterance.volume = 0;
-    try { synthesis.resume?.(); } catch {}
+    try { synthesis.resume?.(); } catch {
+      // Some browsers reject resume until the utterance is queued.
+    }
     synthesis.speak(utterance);
     return true;
   } catch {
@@ -82,7 +84,9 @@ export function monitorSpeechSynthesisStart(synthesis, {
     }
     try {
       synthesis.resume?.();
-    } catch {}
+    } catch {
+      // Keep the timeout monitor running if the browser rejects resume.
+    }
     timer = setTimer(check, interval);
   };
 

@@ -644,7 +644,7 @@ test('provides every client-selected element and the avatar/mobile controls', as
   assert.doesNotMatch(client, /scheduleAvatarExpression|clearAvatarSpeech/);
   assert.match(client, /utterance\.onstart = \(\) => \{\s*if \(playbackId !== state\.speechPlaybackId\) return;\s*startedAt = performance\.now\(\);\s*reportTtsDiagnostic\('TTS utterance onstart'/);
   assert.match(client, /utterance\.onend = \(\) => \{\s*const endedAt = performance\.now\(\);\s*reportTtsDiagnostic\('TTS utterance onend', \{[\s\S]*?started: playbackStarted/);
-  assert.doesNotMatch(client.match(/utterance\.onend = \(\) => \{([\s\S]*?)\n  \};/)?.[1] || '', /markPlaybackStarted/);
+  assert.doesNotMatch(client.match(/utterance\.onend = \(\) => \{([\s\S]*?)\n {2}\};/)?.[1] || '', /markPlaybackStarted/);
   assert.doesNotMatch(styles, /\.ai-avatar\.is-talking|@keyframes avatar-speech/);
   assert.match(styles, /\.holo-stage\.is-speaking \.playback-indicator/);
 });

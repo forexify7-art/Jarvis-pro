@@ -336,7 +336,7 @@ test('speech paths report AI, recognition, and TTS lifecycle events to diagnosti
 });
 
 test('TTS completion does not count as a playback start', () => {
-  const endHandler = /utterance\.onend = \(\) => \{([\s\S]*?)\n  \};/.exec(appSource)?.[1];
+  const endHandler = /utterance\.onend = \(\) => \{([\s\S]*?)\n {2}\};/.exec(appSource)?.[1];
 
   assert.ok(endHandler);
   assert.match(endHandler, /started: playbackStarted/);
@@ -344,8 +344,8 @@ test('TTS completion does not count as a playback start', () => {
 });
 
 test('recognition errors defer lifecycle cleanup to onend and retries remain bounded', () => {
-  const errorHandler = /recognition\.onerror = \(event\) => \{([\s\S]*?)\n  \};\n  recognition\.onend/.exec(appSource)?.[1];
-  const endHandler = /recognition\.onend = \(\) => \{([\s\S]*?)\n  \};\n  clearRecognitionStartTimer/.exec(appSource)?.[1];
+  const errorHandler = /recognition\.onerror = \(event\) => \{([\s\S]*?)\n {2}\};\n {2}recognition\.onend/.exec(appSource)?.[1];
+  const endHandler = /recognition\.onend = \(\) => \{([\s\S]*?)\n {2}\};\n {2}clearRecognitionStartTimer/.exec(appSource)?.[1];
 
   assert.ok(errorHandler);
   assert.doesNotMatch(errorHandler, /stopListening\(|recognitionLifecycle\.finish/);
@@ -360,7 +360,7 @@ test('recognition errors defer lifecycle cleanup to onend and retries remain bou
 });
 
 test('transient recognition errors retry, fatal errors disable wake mode, and manual retry waits for the active end', () => {
-  const errorHandler = /recognition\.onerror = \(event\) => \{([\s\S]*?)\n  \};\n  recognition\.onend/.exec(appSource)?.[1];
+  const errorHandler = /recognition\.onerror = \(event\) => \{([\s\S]*?)\n {2}\};\n {2}recognition\.onend/.exec(appSource)?.[1];
   const stopListeningStart = appSource.indexOf('function stopListening(');
   const stopListeningEnd = appSource.indexOf('\nfunction syncSettings', stopListeningStart);
   const endHandler = stopListeningStart >= 0 && stopListeningEnd > stopListeningStart
