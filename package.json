@@ -29,7 +29,8 @@
     "tauri:dev": "npx --yes @tauri-apps/cli@2 dev",
     "tauri:build": "npx --yes @tauri-apps/cli@2 build",
     "tauri:android:init": "npx --yes @tauri-apps/cli@2 android init && node scripts/tauri-android-setup.mjs",
-    "tauri:android:build": "npx --yes @tauri-apps/cli@2 android build --apk"
+    "tauri:android:build": "npx --yes @tauri-apps/cli@2 android build --apk",
+    "tauri:android:build:debug": "npx --yes @tauri-apps/cli@2 android build --apk --debug --target aarch64 --ci"
   },
   "engines": {
     "node": ">=22.12.0"

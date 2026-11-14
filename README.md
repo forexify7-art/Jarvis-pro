@@ -157,15 +157,15 @@ To inspect UI startup from a phone without DevTools, open the app URL with `?dia
 
 ### Android native APK
 
-The PWA instructions above do not require a native build. For a Tauri APK, install Rust/Cargo with the Android Rust targets, Android Studio with the Android SDK and NDK, platform-tools/ADB, and a compatible JDK; configure `ANDROID_HOME`/`ANDROID_SDK_ROOT` as required by the Tauri Android setup. Then run:
+The PWA instructions above do not require a native build. For a Tauri APK, install Rust/Cargo with the `aarch64-linux-android` target, Android Studio with the Android SDK and NDK, platform-tools/ADB, and JDK 17; configure `ANDROID_HOME`/`ANDROID_SDK_ROOT` and `NDK_HOME` as required by the Tauri Android setup. Then run:
 
 ```sh
 npm install
 npm run tauri:android:init
-npm run tauri:android:build
+npm run tauri:android:build:debug
 ```
 
-The Tauri CLI reports the generated APK path under `src-tauri/gen/android/`. Install it on a physical device with `adb install <apk-path>` and verify microphone/camera prompts, voice stop behavior, network recovery, and background/resume. This Linux workspace has no Rust/Cargo or ADB, so an APK has not been produced or installed here.
+The debug script builds an unsigned-for-release, debug-signed ARM64 APK. The `Android debug APK` GitHub Actions workflow initializes the generated Android project, adds the app's network, microphone, audio, and camera permissions, verifies the APK archive and `arm64-v8a` native library, then uploads it as the `jarvis-android-arm64-debug` artifact. No API credentials or release-signing credentials are used. The Tauri CLI writes build output under `src-tauri/gen/android/app/build/outputs/apk/`; install the verified APK on a physical device with `adb install <apk-path>` and test microphone/camera prompts, voice stop behavior, network recovery, and background/resume.
 
 ## Configure AI
 

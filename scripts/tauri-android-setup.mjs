@@ -17,6 +17,7 @@ const wanted = [
   'android.permission.INTERNET',
   'android.permission.RECORD_AUDIO',
   'android.permission.MODIFY_AUDIO_SETTINGS',
+  'android.permission.CAMERA',
 ];
 let changed = false;
 for (const permission of wanted) {

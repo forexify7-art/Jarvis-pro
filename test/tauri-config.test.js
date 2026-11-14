@@ -41,7 +41,9 @@ test('the Android setup script adds voice permissions to a generated manifest an
     await writeFile(manifest, '<manifest>\n    <application android:label="x"></application>\n</manifest>');
     execFileSync(process.execPath, [join(dir, 'scripts/tauri-android-setup.mjs')]);
     const once = await readFile(manifest, 'utf8');
-    for (const permission of ['INTERNET', 'RECORD_AUDIO', 'MODIFY_AUDIO_SETTINGS']) assert.match(once, new RegExp(`android.permission.${permission}`));
+    for (const permission of ['INTERNET', 'RECORD_AUDIO', 'MODIFY_AUDIO_SETTINGS', 'CAMERA']) {
+      assert.match(once, new RegExp(`android.permission.${permission}`));
+    }
     assert.match(once, /usesCleartextTraffic="true"/);
     execFileSync(process.execPath, [join(dir, 'scripts/tauri-android-setup.mjs')]);
     assert.equal(await readFile(manifest, 'utf8'), once);
