@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Minimal capability: the web UI gets no native APIs (no file system, shell or HTTP plugin).",
+  "windows": ["main"],
+  "permissions": []
+}

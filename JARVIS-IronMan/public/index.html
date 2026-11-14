@@ -1,0 +1,975 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#050a17">
+    <meta name="description" content="A private, browser-based J.A.R.V.I.S. assistant with optional local AI, voice, and web search.">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="J.A.R.V.I.S.">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" href="/icons/jarvis.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/icons/jarvis-192.png">
+    <link rel="stylesheet" href="/styles.css?avatar=66">
+    <title>J.A.R.V.I.S. | Personal AI</title>
+  </head>
+  <body class="new-interface">
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="wordmark" href="/" aria-label="J.A.R.V.I.S. home">
+          <span class="wordmark-mark" aria-hidden="true"><span></span></span>
+          <span>J.A.R.V.I.S.<small>PERSONAL ASSISTANT</small></span>
+        </a>
+        <div class="topbar-right">
+          <span class="connection-indicator" id="connection-status"><i></i><span>CONNECTING</span></span>
+          <div class="mobile-session-bar" aria-label="Session status">
+            <span class="mobile-online-chip"><i aria-hidden="true"></i>Online</span>
+            <span class="mobile-session-time" id="mobile-session-time">00:00</span>
+            <span class="mobile-signal" aria-label="Signal strength"><i></i><i></i><i></i><i></i></span>
+          </div>
+          <button class="icon-button" id="install-button" type="button" aria-label="Install J.A.R.V.I.S." title="Install app or view installation steps">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 17v3h14v-3"/></svg>
+          </button>
+          <button class="icon-button" id="settings-button" type="button" aria-label="Settings" title="Settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="m19.4 15 .1.1a1.8 1.8 0 0 1-2.5 2.5l-.1-.1a1.8 1.8 0 0 0-3 .9v.2a1.8 1.8 0 0 1-3.6 0v-.2a1.8 1.8 0 0 0-3-.9l-.1.1a1.8 1.8 0 0 1-2.5-2.5l.1-.1a1.8 1.8 0 0 0-.9-3h-.2a1.8 1.8 0 0 1 0-3.6h.2a1.8 1.8 0 0 0 .9-3l-.1-.1a1.8 1.8 0 0 1 2.5-2.5l.1.1a1.8 1.8 0 0 0 3-.9v-.2a1.8 1.8 0 0 1 3.6 0v.2a1.8 1.8 0 0 0 3 .9l.1-.1a1.8 1.8 0 0 1 2.5 2.5l-.1.1a1.8 1.8 0 0 0 .9 3h.2a1.8 1.8 0 0 1 0 3.6h-.2a1.8 1.8 0 0 0-.9 3Z"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="main-frame">
+        <nav class="primary-nav" aria-label="Primary navigation">
+          <span class="nav-label">WORKSPACE</span>
+          <button class="nav-item is-current" type="button" data-nav="dashboard"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="5" rx="1"/><rect x="13" y="10" width="8" height="11" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/></svg><span>Home</span></button>
+          <button class="nav-item" type="button" data-nav="chat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4V5Z"/><path d="M8 9h8m-8 4h5"/></svg><span>AI Chat</span></button>
+          <button class="nav-item" type="button" data-nav="voice"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 18v3m-4 0h8"/></svg><span>Voice assistant</span></button>
+          <button class="nav-item" type="button" data-nav="history"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7v5h5M5.6 16.5A8 8 0 1 0 4 12"/><path d="M12 7v5l3 2"/></svg><span>Conversation history</span></button>
+          <button class="nav-item" type="button" data-nav="files"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6l2 2h8v12H4zM8 13h8m-8 3h6"/></svg><span>Files</span></button>
+          <button class="nav-item" type="button" data-nav="applications"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="8" height="7" rx="1"/><rect x="13" y="4" width="8" height="7" rx="1"/><rect x="3" y="13" width="8" height="7" rx="1"/><rect x="13" y="13" width="8" height="7" rx="1"/></svg><span>Applications</span></button>
+          <button class="nav-item" type="button" data-nav="study"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 8 9-5 9 5-9 5-9-5Zm3 2v6c3.5 3 8.5 3 12 0v-6m3-2v7"/></svg><span>Study mode</span><span class="nav-state" id="study-mode-indicator">OFF</span></button>
+          <button class="nav-item" type="button" data-nav="productivity"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M9 2h6m-3 0v3"/></svg><span>Productivity</span></button>
+          <button class="nav-item" type="button" data-nav="system"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span>System monitor</span></button>
+          <button class="nav-item" type="button" data-nav="news" data-requires-full-access><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM8 9h8m-8 4h8m-8 3h5"/></svg><span>News &amp; Briefing</span></button>
+          <button class="nav-item" type="button" data-nav="memory"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM8 8h8m-8 4h8m-8 4h5"/></svg><span>Memory</span></button>
+          <button class="nav-item" type="button" data-nav="activity"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="4" cy="6" r=".8"/><circle cx="4" cy="12" r=".8"/><circle cx="4" cy="18" r=".8"/><path d="M8 6h12M8 12h12M8 18h12"/></svg><span>Activity</span></button>
+          <div class="nav-spacer"></div>
+          <div class="access-control">
+            <div class="access-copy"><span>FULL ACCESS</span><small id="access-mode-note">Browser-safe actions only</small></div>
+            <label class="switch access-switch"><input id="full-access-toggle" type="checkbox"><span></span><b class="sr-only">Enable in-app quick actions</b></label>
+          </div>
+          <button class="nav-item" type="button" data-nav="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="m19.4 15 .1.1a1.8 1.8 0 0 1-2.5 2.5l-.1-.1a1.8 1.8 0 0 0-3 .9v.2a1.8 1.8 0 0 1-3.6 0v-.2a1.8 1.8 0 0 0-3-.9l-.1.1a1.8 1.8 0 0 1-2.5-2.5l.1-.1a1.8 1.8 0 0 0-.9-3h-.2a1.8 1.8 0 0 1 0-3.6h.2a1.8 1.8 0 0 0 .9-3l-.1-.1a1.8 1.8 0 0 1 2.5-2.5l.1.1a1.8 1.8 0 0 0 3-.9v-.2a1.8 1.8 0 0 1 3.6 0v.2a1.8 1.8 0 0 0 3 .9l.1-.1a1.8 1.8 0 0 1 2.5 2.5l-.1.1a1.8 1.8 0 0 0 .9 3h.2a1.8 1.8 0 0 1 0 3.6h-.2a1.8 1.8 0 0 0-.9 3Z"/></svg><span>Settings</span></button>
+          <p class="access-disclaimer">No desktop or phone control is connected. Actions stay inside this app.</p>
+          <button class="nav-item lab-nav-button" type="button" data-nav="lab"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6m-5 0v6l-5.5 9.2A1.8 1.8 0 0 0 6 21h12a1.8 1.8 0 0 0 1.5-2.8L14 9V3"/><path d="M8 15h8m-6-3h4"/></svg><span>J.A.R.V.I.S. LAB</span></button>
+        </nav>
+
+      <main class="workspace">
+        <div class="dashboard-layout" id="dashboard-layout">
+          <section class="presence" data-lab-widget="assistant" aria-labelledby="presence-title">
+            <div class="presence-topline"><span>PERSONAL ASSISTANT</span><span>J.A.R.V.I.S.</span></div>
+            <div class="avatar-hero">
+              <div class="holo-stage" id="holo-stage">
+                <div class="mobile-assistant-bubble" id="mobile-assistant-bubble">How can I help you today?</div>
+                <div class="mobile-data-panels" aria-hidden="true"><span>LINK 98%</span><span>CORE ACTIVE</span><span>VOICE 24 kHz</span></div>
+                <div class="holo-sphere-shell" aria-hidden="true"><i></i></div>
+                <canvas class="avatar-canvas" id="avatar-canvas" aria-hidden="true" hidden></canvas>
+                <div class="holo-emitter" aria-hidden="true"></div>
+                <span class="holo-platform" aria-hidden="true"></span>
+                <div class="orbit orbit-one" aria-hidden="true"></div>
+                <div class="orbit orbit-two" aria-hidden="true"></div>
+                <div class="holo-particles" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                <span class="holo-hud holo-hud-left" aria-hidden="true"><i></i><span>LIVE PROJECTION</span><small>01 / 03</small></span>
+                <span class="holo-hud holo-hud-right" aria-hidden="true"><i></i><span>NEURAL LINK</span><small>ONLINE</small></span>
+                <div class="avatar-frame portrait-cutout-frame" data-blink="open" data-viseme="neutral" data-speaking="false">
+                  <div class="portrait-artwork">
+                    <img class="ai-avatar is-normal portrait-cutout-image" id="ai-avatar" src="/jarvis-portrait.webp" alt="J.A.R.V.I.S. female assistant portrait" width="800" height="875" fetchpriority="high" decoding="async" draggable="false">
+                    <div class="portrait-head" aria-hidden="true">
+                      <div class="portrait-head-content">
+                        <img class="portrait-head-image" src="/jarvis-portrait.webp" width="800" height="875" decoding="async" draggable="false">
+                        <img class="portrait-blink-image" src="/jarvis-portrait-eyes-closed.webp" width="800" height="875" decoding="async" draggable="false">
+                        <canvas class="portrait-mouth-canvas" width="800" height="875"></canvas>
+                        <span class="portrait-debug-markers">
+                          <i class="portrait-debug-marker portrait-debug-left-eye"></i>
+                          <i class="portrait-debug-marker portrait-debug-right-eye"></i>
+                          <i class="portrait-debug-marker portrait-debug-mouth"></i>
+                          <i class="portrait-debug-marker portrait-debug-chin"></i>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <span class="portrait-scanline" aria-hidden="true"></span>
+                </div>
+                <span class="playback-indicator" aria-hidden="true"></span>
+                <span class="mobile-avatar-name"><i aria-hidden="true"></i>J.A.R.V.I.S.</span>
+              </div>
+            </div>
+            <div class="holo-waveform" id="holo-waveform" role="img" aria-label="Voice activity idle">
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            </div>
+            <section class="dashboard-panel state-panel" data-lab-widget="status" aria-label="Assistant status">
+              <span class="sr-only" id="state-panel-live">STANDBY</span>
+              <div class="holo-state-strip" id="holo-state-strip" role="group" aria-label="Assistant states">
+                <button class="holo-state" type="button" data-holo-state="listening" data-mobile-state="listening"><svg class="state-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 18v3m-4 0h8"/></svg><span>Listening</span><small>Awaiting voice</small></button>
+                <button class="holo-state" type="button" data-holo-state="thinking" data-mobile-state="thinking"><svg class="state-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 18h5m-4.5 3h4m-5.7-6.2A6.5 6.5 0 1 1 15.7 15c-.8.6-1.2 1.4-1.2 2h-5c0-.8-.4-1.6-1.2-2.2Z"/><path d="M12 2V1m8 11h1M3 12H2m15.7-6.7.7-.7M5.6 5.6l-.7-.7"/></svg><span>Thinking</span><small>Analyzing...</small></button>
+                <button class="holo-state" type="button" data-holo-state="speaking" data-mobile-state="speaking"><svg class="state-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4h4l5 4V6l-5 4H4Z"/><path d="M17 9a5 5 0 0 1 0 6m2-9a9 9 0 0 1 0 12"/></svg><span>Speaking</span><small>Responding...</small></button>
+                <button class="holo-state" type="button" data-holo-state="online" data-mobile-state="online"><svg class="state-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.2 4.2L19 7"/><circle cx="12" cy="12" r="9"/></svg><span>Online</span><small>Ready</small></button>
+              </div>
+            </section>
+            <div class="presence-copy">
+              <p class="eyebrow" id="assistant-state">SYSTEM STANDBY</p>
+              <h1 id="presence-title">At your service.</h1>
+              <p class="presence-note" id="provider-note">Configure a local model or server-side AI provider to begin.</p>
+            </div>
+            <div class="capability-strip" aria-label="Assistant capabilities">
+              <span><i class="cap-dot" aria-hidden="true"></i>PRIVATE HISTORY</span>
+              <span><i class="cap-dot" aria-hidden="true"></i>BROWSER VOICE</span>
+              <span><i class="cap-dot" aria-hidden="true"></i>WEB LOOKUP</span>
+            </div>
+          </section>
+
+        <div class="dashboard-commandbar">
+          <form class="dashboard-command" id="dashboard-command-form">
+            <button class="voice-console-button primary dashboard-command-mic" id="dashboard-mic-button" type="button" aria-label="Start voice input" aria-pressed="false" title="Start voice input"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 18v3m-4 0h8"/></svg><span class="sr-only">Talk to J.A.R.V.I.S.</span></button>
+            <label class="sr-only" for="dashboard-message">Send a message to J.A.R.V.I.S.</label>
+            <input id="dashboard-message" type="text" maxlength="4000" autocomplete="off" placeholder="Ask J.A.R.V.I.S.">
+            <button class="agent-mode-toggle" type="button" data-agent-mode-toggle aria-pressed="false">Agent</button>
+            <button type="submit" aria-label="Send command" title="Send command"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 12 16-8-5 16-3-7-8-1Zm8 1 8-9"/></svg></button>
+          </form>
+        </div>
+
+        <aside class="right-rail" aria-label="System monitor and tools">
+          <section class="dashboard-panel dashboard-voice-panel" data-lab-widget="voice" aria-labelledby="dashboard-voice-title">
+            <div class="panel-heading"><div><span class="eyebrow">BROWSER SPEECH</span><h2 id="dashboard-voice-title">Voice Assistant</h2></div><i class="status-pulse"></i></div>
+            <div class="voice-console" aria-label="Voice controls">
+              <div class="voice-console-heading"><span>VOICE CHANNEL</span><span id="voice-console-status" role="status" aria-live="polite">STANDBY</span></div>
+              <div class="voice-waveform" id="voice-waveform" role="img" aria-label="Voice channel idle">
+                <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+              </div>
+              <div class="voice-console-controls">
+                <button class="voice-console-button primary" id="dashboard-voice-mic-button" type="button" aria-pressed="false" title="Start voice input"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 18v3m-4 0h8"/></svg><span>Talk</span></button>
+                <button class="voice-console-button" id="dashboard-voice-toggle" type="button" aria-pressed="false" title="Toggle spoken responses"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4h4l5 4V6l-5 4H4Z"/><path d="M17 9a5 5 0 0 1 0 6m2-9a9 9 0 0 1 0 12"/></svg><span id="dashboard-voice-label">Voice off</span></button>
+                <button class="voice-console-icon" id="dashboard-settings-button" type="button" aria-label="Open voice settings" title="Voice settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="m19.4 15 .1.1a1.8 1.8 0 0 1-2.5 2.5l-.1-.1a1.8 1.8 0 0 0-3 .9v.2a1.8 1.8 0 0 1-3.6 0v-.2a1.8 1.8 0 0 0-3-.9l-.1.1a1.8 1.8 0 0 1-2.5-2.5l.1-.1a1.8 1.8 0 0 0-.9-3h-.2a1.8 1.8 0 0 1 0-3.6h.2a1.8 1.8 0 0 0 .9-3l-.1-.1a1.8 1.8 0 0 1 2.5-2.5l.1.1a1.8 1.8 0 0 0 3-.9v-.2a1.8 1.8 0 0 1 3.6 0v.2a1.8 1.8 0 0 0 3 .9l.1-.1a1.8 1.8 0 0 1 2.5 2.5l-.1.1a1.8 1.8 0 0 0 .9 3h.2a1.8 1.8 0 0 1 0 3.6h-.2a1.8 1.8 0 0 0-.9 3Z"/></svg></button>
+              </div>
+            </div>
+          </section>
+            <details class="dashboard-panel dashboard-disclosure dashboard-chat-panel" data-lab-widget="chat" aria-labelledby="dashboard-chat-title" open>
+              <summary class="panel-heading dashboard-chat-heading"><div><span class="eyebrow">CHAT HISTORY</span><h2 id="dashboard-chat-title">Chat History</h2></div><span class="live-label" id="connection-status-dashboard">CONNECTING</span><span class="disclosure-mark" aria-hidden="true"></span></summary>
+              <div class="dashboard-transcript" id="dashboard-transcript" role="log" aria-live="polite" aria-relevant="additions text"></div>
+              <p class="assistant-feedback dashboard-feedback" id="dashboard-feedback" role="status" aria-live="polite"></p>
+              <div class="dashboard-chat-state" id="dashboard-chat-state" role="status" aria-live="polite" hidden>
+                <span id="dashboard-chat-state-label"></span>
+                <button class="dashboard-retry-button" id="dashboard-retry-button" type="button" hidden>Retry request</button>
+              </div>
+              <section class="agent-plan-results" id="agent-plan-results" aria-labelledby="agent-plan-title" hidden>
+                <h3 id="agent-plan-title">Agent steps</h3>
+                <button class="secondary-button danger-button" id="agent-stop-button" type="button" hidden disabled>Stop plan</button>
+                <ol id="agent-step-list" aria-live="polite"></ol>
+              </section>
+              <p class="briefing-note dashboard-chat-note">Replies stay in this browser session. Search results and sources are available from the Search control.</p>
+              <button class="briefing-button dashboard-open-chat" type="button" data-nav="chat">Open full AI chat <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button>
+            </details>
+          <section class="dashboard-panel system-panel" id="system-panel" data-lab-widget="system" aria-labelledby="system-title">
+            <div class="panel-heading"><div><span class="eyebrow">LIVE STATUS</span><h2 id="system-title">Real-Time Info</h2></div><i class="status-pulse"></i></div>
+            <div class="metric-section">
+              <div class="metric-section-heading"><span>SERVER</span><small>App host · updates every 30s</small></div>
+              <div class="monitor-grid server-grid">
+                <div class="metric-readout server-metric"><span id="cpu-label">SERVER CPU</span><strong id="cpu-value">Checking</strong><div class="metric-track" id="cpu-meter-track" hidden><i id="cpu-meter"></i></div></div>
+                <div class="metric-readout server-metric"><span id="ram-label">SERVER RAM</span><strong id="ram-value">Checking</strong><div class="metric-track" id="ram-meter-track" hidden><i id="ram-meter"></i></div></div>
+                <div class="metric-readout server-metric"><span id="disk-label">SERVER STORAGE</span><strong id="disk-value">Checking</strong><div class="metric-track" id="disk-meter-track" hidden><i id="disk-meter"></i></div></div>
+              </div>
+            </div>
+            <div class="metric-section">
+              <div class="metric-section-heading"><span>THIS DEVICE</span><small>Browser-reported · availability varies</small></div>
+              <div class="monitor-grid device-grid">
+                <div class="device-datetime-readout"><span>LOCAL DATE &amp; TIME</span><time id="local-datetime-value" datetime="">Updating…</time></div>
+                <div class="device-metric"><span>DEVICE</span><strong id="device-type-value">Checking</strong></div>
+                <div class="device-metric"><span>BROWSER / PLATFORM</span><strong id="platform-value">Checking</strong></div>
+                <div class="device-metric" data-device-group="mobile"><span>BATTERY</span><strong id="battery-value">Checking</strong></div>
+                <div class="device-metric" data-device-group="mobile"><span>BROWSER MEMORY</span><strong id="browser-memory-value">Checking</strong></div>
+                <div><span>NETWORK</span><strong id="network-value">Checking</strong></div>
+              </div>
+            </div>
+            <details class="metric-details">
+              <summary>Capabilities and connection</summary>
+              <div class="monitor-grid">
+                <div><span>VOICE INPUT</span><strong id="voice-value">Checking</strong></div>
+                <div><span>VOICE OUTPUT</span><strong id="voice-output-value">Checking</strong></div>
+                <div><span>JARVIS CONNECTION</span><strong id="backend-connection-value">Checking</strong></div>
+                <div><span>LOCAL HISTORY</span><strong id="memory-value">Checking</strong></div>
+                <div><span>AI BACKEND</span><strong id="model-value">Not configured</strong></div>
+              </div>
+            </details>
+            <p class="monitor-context" id="monitor-context">Device details use browser-reported information. Hardware readings describe the J.A.R.V.I.S. server.</p>
+          </section>
+          <section class="dashboard-panel quick-panel" aria-labelledby="quick-title">
+            <div class="panel-heading"><div><span class="eyebrow">SHORTCUTS</span><h2 id="quick-title">Quick Actions</h2></div></div>
+            <div class="quick-actions">
+              <button type="button" data-quick-action="capture" data-requires-full-access><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8m-4-3v3m-6-12h5m-5 4h9"/></svg><span>Vision</span></button>
+              <button type="button" id="browser-research-open" data-quick-action="browser-research" data-requires-full-access title="Enable Full Access to research a public page"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5M8 11h5m-2.5-2.5v5"/></svg><span>Research</span></button>
+              <button type="button" data-quick-action="files"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6l2 2h8v12H4zM8 13h8m-8 3h6"/></svg><span>Files</span></button>
+              <button type="button" data-quick-action="applications"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg><span>Apps</span></button>
+              <button type="button" data-quick-action="search" data-requires-full-access><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/></svg><span>Search</span></button>
+              <button type="button" data-quick-action="chat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4V5Z"/><path d="M8 9h8m-8 4h5"/></svg><span>Chat</span></button>
+              <button type="button" data-quick-action="study"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 8 9-5 9 5-9 5-9-5Zm3 2v6c3.5 3 8.5 3 12 0v-6m3-2v7"/></svg><span>Study</span><span class="nav-state" id="study-quick-indicator">OFF</span></button>
+              <div class="focus-timer-row"><span>FOCUS TIMER</span><strong id="focus-timer-display">25:00</strong><button type="button" id="focus-timer-button" aria-pressed="false">Start</button></div>
+            </div>
+          </section>
+          <details class="dashboard-panel dashboard-accordion briefing-panel" aria-labelledby="briefing-title">
+            <summary class="panel-heading"><div><span class="eyebrow">RETRIEVED SOURCES</span><h2 id="briefing-title">News &amp; Briefing</h2></div><span class="disclosure-mark" aria-hidden="true"></span></summary>
+            <p class="briefing-note">Source-backed headlines and article links appear when available; dates are shown only when provided by a source.</p>
+            <button class="briefing-button" id="news-button" type="button" data-requires-full-access>Fetch a news briefing <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button>
+            <div class="briefing-results" id="briefing-results" aria-live="polite"></div>
+          </details>
+          <details class="dashboard-panel dashboard-accordion upload-panel" aria-labelledby="upload-title">
+            <summary class="panel-heading"><div><span class="eyebrow">LOCAL DOCUMENTS</span><h2 id="upload-title">File upload</h2></div><span class="disclosure-mark" aria-hidden="true"></span></summary>
+            <p class="briefing-note">Read text and ZIP files, edit local workspace files, or download an export.</p>
+            <button class="briefing-button" id="dashboard-attach-button" type="button"><span>Choose file</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L8 8m4-4 4 4M5 14v5h14v-5"/></svg></button>
+            <p class="dashboard-file-status" id="dashboard-file-status">No file selected</p>
+            <ul class="file-workspace-list" id="file-workspace-list" aria-label="Workspace files"></ul>
+            <ul class="file-zip-entries" id="file-zip-entries" aria-label="ZIP entries"></ul>
+            <label for="file-workspace-content">Selected file content</label>
+            <textarea id="file-workspace-content" rows="6" maxlength="5242880" placeholder="Choose a text file or ZIP entry, or create a file below." disabled></textarea>
+            <div class="file-workspace-actions">
+              <button class="planner-secondary" id="file-save-button" type="button" disabled>Save edits</button>
+              <button class="planner-secondary" id="file-download-button" type="button" disabled>Download</button>
+              <button class="planner-secondary" id="file-export-button" type="button" disabled>Export workspace ZIP</button>
+            </div>
+            <form class="file-create-form" id="file-create-form">
+              <label for="file-create-name">New file name</label>
+              <input id="file-create-name" type="text" maxlength="100" placeholder="notes.txt" required>
+              <label for="file-create-content">New file content</label>
+              <textarea id="file-create-content" rows="3" maxlength="5242880" required></textarea>
+              <button class="planner-primary" type="submit">Create file</button>
+            </form>
+          </details>
+          <details class="dashboard-panel dashboard-accordion app-hub-panel" aria-labelledby="app-hub-panel-title" data-app-hub>
+            <summary class="panel-heading"><div><span class="eyebrow">PERSONAL LAUNCHER</span><h2 id="app-hub-panel-title">JARVIS APP HUB</h2></div><span class="disclosure-mark" aria-hidden="true"></span></summary>
+            <div class="app-hub-panel-actions"><button class="app-hub-add" type="button" data-hub-action="vision" data-requires-full-access title="Enable Full Access to use Vision">Vision</button><button class="app-hub-add" type="button" data-hub-action="add">Add App</button></div>
+            <p class="app-hub-note">Your shortcuts are saved on this device. Websites open in a new tab; Android app, dialer, and message links depend on browser and device support.</p>
+            <div class="app-hub-tools">
+              <label class="sr-only" for="app-hub-search-panel">Search saved apps</label>
+              <input id="app-hub-search-panel" data-hub-search type="search" placeholder="Search My Apps">
+            </div>
+            <div class="app-hub-list" data-hub-apps aria-live="polite"></div>
+            <form class="app-hub-form" data-hub-form hidden>
+              <strong class="app-hub-form-title">Add or edit shortcut</strong>
+              <label>Name<input data-hub-field="name" maxlength="32" autocomplete="off" required></label>
+              <label>Website, Android app, call, or message link<input data-hub-field="url" type="text" inputmode="url" maxlength="2048" placeholder="https://example.com, tel:+15551234567, or sms:+15551234567?body=Hello" required></label>
+              <label>Fallback website (optional)<input data-hub-field="fallback" type="text" inputmode="url" maxlength="2048" placeholder="https://example.com"></label>
+              <label>App icon (optional)<input data-hub-field="icon" type="file" accept="image/png,image/jpeg,image/webp"></label>
+              <span class="app-hub-icon-status" data-hub-icon-status>PNG, JPEG, or WebP; up to 256 KB.</span>
+              <div class="app-hub-form-actions"><button class="app-hub-primary" type="submit">Save shortcut</button><button type="button" data-hub-action="cancel">Cancel</button></div>
+            </form>
+            <form class="app-hub-runner" data-hub-runner>
+              <label>URL Runner<input data-hub-field="run-url" type="text" inputmode="url" maxlength="2048" placeholder="Website, intent://, tel:, or sms: link" required></label>
+              <label class="sr-only" for="app-hub-run-fallback-panel">Optional fallback website</label>
+              <input id="app-hub-run-fallback-panel" data-hub-field="run-fallback" type="text" inputmode="url" maxlength="2048" placeholder="Optional fallback website">
+              <button class="app-hub-primary" type="submit">Open / Run</button>
+              <button class="app-hub-primary" type="button" data-hub-action="copy-text">Copy text</button>
+            </form>
+            <p class="app-hub-status" data-hub-status role="status" aria-live="polite"></p>
+            <p class="app-hub-safety">Websites and Android links open outside JARVIS when supported. APKs and native apps cannot run inside a website; uploaded icons are images only and are never executed.</p>
+          </details>
+          <details class="dashboard-panel dashboard-accordion ai-status-panel" aria-labelledby="ai-status-title">
+            <summary class="panel-heading"><div><span class="eyebrow">INTELLIGENCE CORE</span><h2 id="ai-status-title">AI status</h2></div><span class="disclosure-mark" aria-hidden="true"></span></summary>
+            <div class="ai-status-readout"><span>PROVIDER</span><strong id="left-ai-status">CHECKING</strong><p id="left-ai-detail">Connecting to J.A.R.V.I.S. services...</p></div>
+            <div class="status-divider"></div>
+            <div class="mini-readout"><span>SESSION</span><strong id="left-session-status">READY</strong></div>
+            <div class="mini-readout"><span>MICROPHONE</span><strong id="left-mic-status">CHECKING</strong></div>
+            <div class="mini-readout"><span>MODE</span><strong id="left-mode-status">STANDARD</strong></div>
+            <div class="mini-readout"><span>LANGUAGE</span><strong id="left-language-status">ENGLISH</strong></div>
+            <div class="mini-readout"><span>MEMORY</span><strong id="left-memory-status">LOCAL</strong></div>
+          </details>
+          <details class="dashboard-panel dashboard-accordion activity-panel" id="activity-panel" aria-labelledby="activity-title">
+            <summary class="panel-heading"><div><span class="eyebrow">SESSION TRACE</span><h2 id="activity-title">Activity feed</h2></div><span class="disclosure-mark" aria-hidden="true"></span></summary>
+            <ol id="activity-log" class="activity-log" aria-live="polite"><li><i aria-hidden="true"></i><span>Interface initialized</span><time>NOW</time></li></ol>
+          </details>
+          <details class="dashboard-panel dashboard-disclosure planner-panel" id="planner-panel" aria-labelledby="planner-title" open>
+            <summary class="panel-heading"><div><span class="eyebrow">SAVED ON THIS DEVICE</span><h2 id="planner-title">Notes &amp; Tasks</h2></div><span class="disclosure-mark" aria-hidden="true"></span></summary>
+            <section class="task-priority" id="task-priority" aria-labelledby="task-priority-title">
+              <div class="priority-heading"><span class="eyebrow">LOCAL PRODUCTIVITY</span><h3 id="task-priority-title">Daily Insights</h3></div>
+              <p class="priority-summary" id="priority-summary" aria-live="polite">Checking local tasks…</p>
+              <div class="insight-metrics" role="group" aria-label="Task and focus statistics">
+                <div><span>Total tasks</span><strong id="insight-total-tasks">0</strong></div>
+                <div><span>Pending</span><strong id="insight-pending-tasks">0</strong></div>
+                <div><span>Completed</span><strong id="insight-completed-tasks">0</strong></div>
+                <div><span>Completed today</span><strong id="insight-completed-today">0</strong></div>
+                <div><span title="Completed focus sessions recorded in this session's visible activity feed">Focus sessions · session feed</span><strong id="insight-focus-sessions">0</strong></div>
+              </div>
+              <p class="insight-oldest" id="insight-oldest-task"></p>
+              <p class="insight-next-action" id="insight-next-action"></p>
+              <p class="priority-activity" id="priority-activity"></p>
+              <div class="priority-suggestion" id="priority-suggestion" hidden>
+                <p class="priority-task-title" id="priority-task-title"></p>
+                <p class="priority-reason" id="priority-reason"></p>
+                <p class="priority-session">Suggested session: 25 minutes with the existing focus timer.</p>
+                <div class="priority-actions"><button class="planner-primary" id="priority-accept" type="button">Start focus session</button><button class="planner-secondary" id="priority-dismiss" type="button">Dismiss</button></div>
+              </div>
+              <p class="priority-empty" id="priority-empty" hidden></p>
+            </section>
+            <div class="planner-grid">
+              <details class="planner-section dashboard-disclosure" id="notes-section" aria-labelledby="notes-title" open>
+                <summary class="planner-section-heading"><h3 id="notes-title">Smart notes</h3><span>LOCAL</span><span class="disclosure-mark" aria-hidden="true"></span></summary>
+                <form class="planner-form" id="note-form">
+                  <label for="note-title">Title</label>
+                  <input id="note-title" name="title" type="text" maxlength="120" autocomplete="off" placeholder="Note title" required>
+                  <label for="note-content">Note</label>
+                  <textarea id="note-content" name="content" rows="4" maxlength="12000" placeholder="Write a note..."></textarea>
+                  <div class="planner-form-actions"><button class="planner-primary" id="note-save-button" type="submit">Save note</button><button class="planner-secondary" id="note-cancel-button" type="button" hidden>Cancel</button></div>
+                  <p class="planner-status" id="note-status" role="status" aria-live="polite"></p>
+                </form>
+                <label class="sr-only" for="note-search">Search saved notes</label>
+                <input class="planner-search" id="note-search" type="search" placeholder="Search notes">
+                <ul class="planner-list note-list" id="notes-list" aria-live="polite"><li class="planner-empty">No notes yet. Add one above.</li></ul>
+              </details>
+              <details class="planner-section dashboard-disclosure" id="tasks-section" aria-labelledby="tasks-title" open>
+                <summary class="planner-section-heading"><h3 id="tasks-title">Tasks</h3><span>NO REMINDERS</span><span class="disclosure-mark" aria-hidden="true"></span></summary>
+                <form class="planner-form" id="task-form">
+                  <label for="task-title">Task</label>
+                  <input id="task-title" name="title" type="text" maxlength="200" autocomplete="off" placeholder="What needs doing?" required>
+                  <label for="task-details">Details <span class="planner-optional">optional</span></label>
+                  <textarea id="task-details" name="details" rows="2" maxlength="2000" placeholder="Add a short detail..."></textarea>
+                  <div class="planner-form-actions"><button class="planner-primary" id="task-save-button" type="submit">Add task</button><button class="planner-secondary" id="task-cancel-button" type="button" hidden>Cancel</button></div>
+                  <p class="planner-status" id="task-status" role="status" aria-live="polite"></p>
+                </form>
+                <div class="task-group" id="pending-tasks-group"><h4>Pending <span id="pending-task-count">0</span></h4><ul class="planner-list task-list" id="pending-task-list" aria-live="polite"><li class="planner-empty">No pending tasks.</li></ul></div>
+                <div class="task-group" id="completed-tasks-group"><h4>Completed <span id="completed-task-count">0</span></h4><ul class="planner-list task-list" id="completed-task-list" aria-live="polite"><li class="planner-empty">No completed tasks.</li></ul></div>
+              </details>
+            </div>
+          </details>
+          <details class="dashboard-panel dashboard-disclosure smart-memory-panel" id="smart-memory-panel" aria-labelledby="smart-memory-title" open>
+            <summary class="panel-heading">
+              <div><span class="eyebrow">PRIVATE · THIS DEVICE</span><h2 id="smart-memory-title">Smart Memory</h2></div>
+              <span class="disclosure-mark" aria-hidden="true"></span>
+            </summary>
+            <div class="smart-memory-toggle-row"><label class="switch" for="smart-memory-enabled-dashboard"><input id="smart-memory-enabled-dashboard" type="checkbox" aria-label="Use approved memories in AI context"><span></span></label></div>
+            <p class="smart-memory-privacy">Add memories yourself, review each one, and explicitly approve it for AI context. Memories are stored in this browser; approved relevant entries are sent with your message to the configured AI provider when you chat. No memory-specific external service is used. Do not save credentials or sensitive personal, financial, or medical information.</p>
+            <form class="planner-form smart-memory-form" id="smart-memory-form">
+              <label for="smart-memory-type">Memory type</label>
+              <select id="smart-memory-type" name="type"><option value="preference">Preference</option><option value="fact">Important fact</option></select>
+              <label for="smart-memory-title-input">Title</label>
+              <input id="smart-memory-title-input" name="title" type="text" maxlength="100" autocomplete="off" placeholder="For example: Preferred response style" required>
+              <label for="smart-memory-content-input">Memory</label>
+              <textarea id="smart-memory-content-input" name="content" rows="3" maxlength="1000" placeholder="Add a preference or fact you want J.A.R.V.I.S. to remember..." required></textarea>
+              <div class="planner-form-actions"><button class="planner-primary" id="smart-memory-save" type="submit">Save memory</button><button class="planner-secondary" id="smart-memory-cancel" type="button" hidden>Cancel</button><button class="planner-secondary danger-button" id="smart-memory-clear" type="button">Clear all memories</button></div>
+              <p class="planner-status" id="smart-memory-status" role="status" aria-live="polite"></p>
+            </form>
+            <div class="smart-memory-transfer-actions">
+              <button class="planner-secondary" id="smart-memory-save-conversation" type="button">Save this conversation</button>
+              <button class="planner-secondary" id="smart-memory-export" type="button">Export memories</button>
+              <button class="planner-secondary" id="smart-memory-import" type="button">Import memories</button>
+              <input id="smart-memory-import-file" type="file" accept=".json,application/json" hidden>
+              <input id="smart-memory-passphrase" type="password" autocomplete="off" minlength="8" placeholder="Passphrase for encrypted backup (8+ chars)" aria-label="Passphrase for encrypted memory backup">
+              <button class="planner-secondary" id="smart-memory-export-encrypted" type="button">Export encrypted</button>
+            </div>
+            <label class="sr-only" for="smart-memory-search">Search saved memories</label>
+            <input class="planner-search" id="smart-memory-search" type="search" placeholder="Search memories">
+            <ul class="planner-list smart-memory-list" id="smart-memory-list" aria-live="polite"><li class="planner-empty">No memories saved on this device.</li></ul>
+          </details>
+        </aside>
+        <p class="sr-only" id="holo-state-announcement" role="status" aria-live="polite">Waiting for server status.</p>
+        </div>
+
+        <nav class="new-feature-bar" aria-label="Dashboard quick navigation">
+          <button type="button" data-dashboard-feature="chat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4V5Z"/><path d="M8 9h8m-8 4h5"/></svg><span>Chat</span></button>
+          <button type="button" data-dashboard-feature="voice"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 18v3m-4 0h8"/></svg><span>Voice</span></button>
+          <button type="button" data-dashboard-feature="files"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6l2 2h8v12H4z"/><path d="M8 13h8m-8 3h6"/></svg><span>Files</span></button>
+          <button type="button" data-dashboard-feature="browser"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg><span>App Hub</span></button>
+          <button type="button" data-dashboard-feature="system"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span>Monitor</span></button>
+          <button type="button" data-dashboard-feature="more"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg><span>More</span></button>
+        </nav>
+
+        <section class="conversation" id="conversation-view" aria-label="Legacy assistant conversation" hidden>
+          <div class="conversation-heading">
+            <div><span class="eyebrow">LIVE SESSION</span><h2>Conversation</h2></div>
+            <button class="icon-button subtle" id="clear-button" type="button" aria-label="Clear conversation history" title="Clear history">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M5.5 7l1 13h11l1-13M9 7V4h6v3"/></svg>
+            </button>
+          </div>
+          <div class="transcript" id="transcript" role="log" aria-live="polite" aria-relevant="additions text"></div>
+          <div class="conversation-chat-state" id="conversation-chat-state" role="status" aria-live="polite" hidden>
+            <span id="conversation-chat-state-label"></span>
+            <button class="conversation-retry-button" id="conversation-retry-button" type="button" hidden>Retry request</button>
+          </div>
+          <div class="assistant-feedback" id="assistant-feedback" role="status" aria-live="polite"></div>
+
+          <form class="composer" id="chat-form">
+            <label class="sr-only" for="message-input">Message J.A.R.V.I.S.</label>
+            <textarea id="message-input" rows="1" maxlength="4000" placeholder="Ask J.A.R.V.I.S. anything..." required></textarea>
+            <div class="composer-actions">
+              <div class="composer-tools">
+                <button class="tool-button" id="attach-button" type="button" title="Attach a small text file">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 12.5 6.4-6.4a3 3 0 0 1 4.2 4.2l-8.1 8.1a5 5 0 0 1-7.1-7.1l8.2-8.2"/></svg><span>Attach</span>
+                </button>
+                <input class="sr-only" id="file-input" type="file" accept=".txt,.md,.json,.csv,.tsv,.js,.mjs,.css,.html,.xml,.yml,.yaml,.log,.py,.ini,.zip,.pdf,.docx,.xlsx,text/plain,text/markdown,text/csv,application/zip,application/pdf">
+                <button class="tool-button" type="button" data-quick-action="capture" data-requires-full-access aria-label="Open JARVIS Vision" title="Capture one screen frame for JARVIS Vision">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8m-4-3v3m-6-12h5m-5 4h9"/></svg><span>Vision</span>
+                </button>
+                <button class="tool-button" id="search-toggle" type="button" aria-pressed="false" title="Search the web">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/></svg><span>Search web</span>
+                </button>
+                <button class="tool-button agent-mode-toggle" type="button" data-agent-mode-toggle aria-pressed="false">Agent</button>
+                <button class="tool-button mic-button" id="mic-button" type="button" title="Speak a message" aria-label="Start voice input" aria-pressed="false">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 18v3m-4 0h8"/></svg><span>Speak</span>
+                </button>
+              </div>
+              <button class="send-button" id="send-button" type="submit" aria-label="Send message" title="Send message">
+                <span>Send</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 12 16-8-5 16-3-7-8-1Zm8 1 8-9"/></svg>
+              </button>
+            </div>
+          </form>
+          <p class="attachment-note" id="attachment-note" hidden></p>
+          <p class="privacy-line">History stays in this browser. Text attachments are sent with your message to the configured AI provider; voice recognition may use your browser's speech service.</p>
+        </section>
+        <section class="jarvis-lab" id="jarvis-lab" aria-labelledby="jarvis-lab-title" hidden>
+          <header class="lab-header">
+            <div class="lab-heading-copy">
+              <span class="eyebrow">J.A.R.V.I.S. / EXPERIMENTAL WORKSPACE</span>
+              <h1 id="jarvis-lab-title" tabindex="-1">J.A.R.V.I.S. LAB</h1>
+              <p>A dedicated space for shaping, extending, and developing your assistant.</p>
+            </div>
+            <button class="lab-return-button" id="lab-return-button" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 5-7 7 7 7M7 12h14"/></svg>
+              <span>Return to J.A.R.V.I.S.</span>
+            </button>
+          </header>
+          <div class="lab-status-bar" role="status">
+            <span><i aria-hidden="true"></i> LAB INTERFACE ONLINE</span>
+            <span>STEP 06 · SAFETY GATES ACTIVE</span>
+          </div>
+          <div class="lab-module-grid" aria-label="J.A.R.V.I.S. LAB modules">
+            <article class="lab-module-card lab-module-action" data-lab-module="personalize" role="button" tabindex="0" aria-haspopup="true" aria-controls="personalize-panel">
+              <div class="lab-module-meta"><span>MODULE 01</span><span>INTERFACE READY</span></div>
+              <div class="lab-module-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3"/><path d="M5 20a7 7 0 0 1 14 0m-7-9v3m-3 3h6"/></svg></div>
+              <h2>Personalize</h2>
+              <p>Shape the assistant experience around your preferences and workflow.</p>
+              <span class="lab-module-state">OPEN PERSONALIZATION CONTROLS</span>
+            </article>
+            <article class="lab-module-card lab-module-action" data-lab-module="ai-modify" role="button" tabindex="0" aria-haspopup="true" aria-controls="ai-modify-panel">
+              <div class="lab-module-meta"><span>MODULE 02</span><span>INTERFACE PREVIEW</span></div>
+              <div class="lab-module-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v3m0 12v3M3 12h3m12 0h3m-2.6-6.4-2.1 2.1M7.7 16.3l-2.1 2.1m12.8 0-2.1-2.1M7.7 7.7 5.6 5.6"/><circle cx="12" cy="12" r="4"/></svg></div>
+              <h2>AI Modify</h2>
+              <p>A future workspace for configuring and refining assistant behavior.</p>
+              <span class="lab-module-state">OPEN CHANGE PROPOSAL INTERFACE</span>
+            </article>
+            <article class="lab-module-card lab-module-action" data-lab-module="code-studio" role="button" tabindex="0" aria-haspopup="true" aria-controls="code-studio-panel">
+              <div class="lab-module-meta"><span>MODULE 03</span><span>LOCAL PREVIEW</span></div>
+              <div class="lab-module-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m8 7-5 5 5 5m8-10 5 5-5 5m-3-13-2 16"/></svg></div>
+              <h2>Code Studio</h2>
+              <p>A dedicated development environment for future J.A.R.V.I.S. projects.</p>
+              <span class="lab-module-state">OPEN LOCAL CODE WORKSPACE</span>
+            </article>
+            <article class="lab-module-card lab-module-action" data-lab-module="extensions" role="button" tabindex="0" aria-haspopup="true" aria-controls="extensions-panel">
+              <div class="lab-module-meta"><span>MODULE 04</span><span>LOCAL MANAGER</span></div>
+              <div class="lab-module-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v3m0 12v3m9-9h-3M6 12H3m15.4-6.4-2.1 2.1M7.7 16.3l-2.1 2.1m12.8 0-2.1-2.1M7.7 7.7 5.6 5.6"/><circle cx="12" cy="12" r="3"/></svg></div>
+              <h2>Extensions</h2>
+              <p>An interface for future add-ons that expand assistant capabilities.</p>
+              <span class="lab-module-state">OPEN SAFE EXTENSION MANAGER</span>
+            </article>
+          </div>
+          <section class="lab-safety-panel" id="lab-safety-panel" aria-labelledby="lab-safety-title">
+            <div class="lab-safety-heading">
+              <div>
+                <span class="eyebrow">CENTRAL SAFETY LAYER / READ-ONLY</span>
+                <h2 id="lab-safety-title">Safety &amp; Recovery</h2>
+                <p>Project file changes, backup creation, and rollback are not enabled. LAB modules remain isolated and local.</p>
+              </div>
+              <span class="lab-safety-lock" aria-label="Project changes disabled">PROJECT LOCKED</span>
+            </div>
+            <div class="lab-safety-grid">
+              <article>
+                <h3>Backup Manager</h3>
+                <p>Future backups use timestamped, collision-safe IDs in a separate store; no project files are currently accessible.</p>
+                <span class="lab-safety-state">No backup created</span>
+                <button type="button" disabled>Create backup · unavailable</button>
+              </article>
+              <article>
+                <h3>Change Approval</h3>
+                <p>Future changes require workspace-relative paths, a visible file list and redacted diff, passing checks, and explicit approval.</p>
+                <span class="lab-safety-state" id="lab-safety-change-state">Disabled · project files cannot be changed by J.A.R.V.I.S. LAB.</span>
+                <button type="button" disabled>Approve project changes · disabled</button>
+              </article>
+              <article>
+                <h3>Validation Gate</h3>
+                <p>Every proposed change must pass its listed validation checks before approval. LAB does not execute generated code.</p>
+                <span class="lab-safety-state">No changes to validate</span>
+              </article>
+              <article>
+                <h3>Rollback</h3>
+                <p>Future rollback requires confirmation and a separate backup of the current state before restoration.</p>
+                <span class="lab-safety-state">Unavailable · no project backups</span>
+                <button type="button" disabled>Restore backup · unavailable</button>
+              </article>
+              <article>
+                <h3>Secrets Protection</h3>
+                <p>Credential-like values are redacted from previews, history, clipboard copies, and downloads. Packages with detected credentials are rejected.</p>
+                <span class="lab-safety-state">Secret checks active</span>
+              </article>
+            </div>
+          </section>
+          <section class="personalize-panel" id="personalize-panel" aria-labelledby="personalize-title" hidden>
+            <div class="personalize-heading">
+              <div>
+                <span class="eyebrow">MODULE 01 / PERSONAL SETTINGS</span>
+                <h2 id="personalize-title" tabindex="-1">Personalize J.A.R.V.I.S.</h2>
+                <p>Preview your interface choices before applying them. These preferences are stored separately from J.A.R.V.I.S. settings.</p>
+              </div>
+              <button class="personalize-back-button" id="personalize-cancel" type="button">Back to LAB</button>
+            </div>
+            <div class="personalize-content">
+              <form class="personalize-controls" id="personalize-form">
+                <fieldset class="personalize-field">
+                  <legend>Theme</legend>
+                  <div class="personalize-choice-row">
+                    <label><input type="radio" name="lab-theme" value="dark"><span>Dark</span></label>
+                    <label><input type="radio" name="lab-theme" value="light"><span>Light</span></label>
+                    <label><input type="radio" name="lab-theme" value="system"><span>System</span></label>
+                  </div>
+                </fieldset>
+                <fieldset class="personalize-field">
+                  <legend>Accent color</legend>
+                  <div class="personalize-accent-row">
+                    <label><input type="radio" name="lab-accent" value="cyan"><span class="accent-swatch accent-cyan"></span><span>Cyan</span></label>
+                    <label><input type="radio" name="lab-accent" value="blue"><span class="accent-swatch accent-blue"></span><span>Blue</span></label>
+                    <label><input type="radio" name="lab-accent" value="violet"><span class="accent-swatch accent-violet"></span><span>Violet</span></label>
+                    <label><input type="radio" name="lab-accent" value="mint"><span class="accent-swatch accent-mint"></span><span>Mint</span></label>
+                    <label><input type="radio" name="lab-accent" value="amber"><span class="accent-swatch accent-amber"></span><span>Amber</span></label>
+                  </div>
+                  <label class="personalize-select-label" for="avatar-theme-select">Avatar visual theme
+                    <small>Choose the holographic colors used by J.A.R.V.I.S.</small>
+                    <select id="avatar-theme-select"><option value="electric-blue">Electric Blue</option><option value="neon-purple">Neon Purple</option><option value="matrix-green">Matrix Green</option><option value="cyber-amber">Cyber Amber</option><option value="holographic-cyan">Holographic Cyan</option><option value="neon-pink">Neon Pink</option></select>
+                  </label>
+                </fieldset>
+                <label class="personalize-select-label" for="lab-density-select">Layout density
+                  <select id="lab-density-select">
+                    <option value="comfortable">Comfortable</option>
+                    <option value="compact">Compact</option>
+                  </select>
+                </label>
+                <label class="personalize-select-label" for="lab-voice-select">LAB voice preference
+                  <select id="lab-voice-select"><option value="">System default</option></select>
+                </label>
+                <p class="personalize-help" id="lab-voice-help">Saved separately; this does not change J.A.R.V.I.S. speech settings.</p>
+                <fieldset class="personalize-field personalize-widget-field">
+                  <legend>Dashboard widgets</legend>
+                  <label><input type="checkbox" name="lab-widget-assistant" checked><span>Assistant presence</span></label>
+                  <label><input type="checkbox" name="lab-widget-status" checked><span>Assistant status</span></label>
+                  <label><input type="checkbox" name="lab-widget-voice" checked><span>Voice panel</span></label>
+                  <label><input type="checkbox" name="lab-widget-chat" checked><span>Chat history</span></label>
+                  <label><input type="checkbox" name="lab-widget-system" checked><span>System monitor</span></label>
+                </fieldset>
+              </form>
+              <section class="personalize-preview" id="personalize-preview" aria-label="Live interface preview">
+                <div class="personalize-preview-top"><span>LIVE PREVIEW</span><span>J.A.R.V.I.S.</span></div>
+                <div class="personalize-preview-presence" data-preview-widget="assistant">
+                  <span class="preview-orb" aria-hidden="true"></span>
+                  <strong>At your service.</strong>
+                  <small>PERSONAL AI</small>
+                  <span class="personalize-preview-voice" id="personalize-preview-voice">System default voice</span>
+                </div>
+                <div class="personalize-preview-widgets">
+                  <span data-preview-widget="status">ASSISTANT STATUS</span>
+                  <span data-preview-widget="voice">VOICE CHANNEL</span>
+                  <span data-preview-widget="chat">CHAT HISTORY</span>
+                  <span data-preview-widget="system">SYSTEM MONITOR</span>
+                </div>
+                <p class="personalize-preview-note" id="personalize-preview-note" aria-live="polite">System theme · Comfortable layout</p>
+              </section>
+            </div>
+            <div class="personalize-actions">
+              <p id="personalize-status" role="status" aria-live="polite">Changes are preview-only until applied.</p>
+              <div>
+                <button class="personalize-secondary-button" id="personalize-reset" type="button">Reset</button>
+                <button class="personalize-secondary-button" id="personalize-cancel-footer" type="button">Cancel</button>
+                <button class="personalize-apply-button" id="personalize-apply" type="button">Apply</button>
+              </div>
+            </div>
+          </section>
+          <section class="ai-modify-panel" id="ai-modify-panel" aria-labelledby="ai-modify-title" hidden>
+            <div class="ai-modify-heading">
+              <div>
+                <span class="eyebrow">MODULE 02 / CHANGE PROPOSALS</span>
+                <h2 id="ai-modify-title" tabindex="-1">AI Modify</h2>
+                <p>Describe a change and review the plan, affected workspace files, and code diff before any future approval.</p>
+              </div>
+              <button class="personalize-back-button" id="ai-modify-back" type="button">Back to LAB</button>
+            </div>
+            <div class="ai-modify-safety" role="status">
+              <strong>Interface-only mode</strong>
+              <span id="ai-modify-availability">AI plan generation is not connected. Requests stay in this browser; no AI request, file write, code execution, or backup is performed.</span>
+              <small>Do not include API keys, passwords, tokens, or other secrets. History stores event metadata only, never your request text.</small>
+            </div>
+            <div class="ai-modify-request" id="ai-modify-form" role="group" aria-labelledby="ai-modify-request-label">
+              <label id="ai-modify-request-label" for="ai-modify-request">What would you like to change?</label>
+              <textarea id="ai-modify-request" maxlength="4000" rows="5" placeholder="Describe the J.A.R.V.I.S. change you have in mind..." autocomplete="off"></textarea>
+              <div class="ai-modify-request-actions">
+                <span>Workspace scope: this J.A.R.V.I.S. project only</span>
+                <button class="personalize-apply-button" id="ai-modify-analyze" type="button">Analyze request</button>
+              </div>
+            </div>
+            <section class="ai-modify-review" aria-label="Proposed implementation review">
+              <div class="ai-modify-review-heading">
+                <h3>Proposed implementation plan</h3>
+                <span id="ai-modify-plan-status">No plan generated</span>
+              </div>
+              <p id="ai-modify-plan">A proposal will appear here only when a trusted AI integration is available. Nothing has been generated.</p>
+              <div class="ai-modify-files">
+                <h4>Affected project files</h4>
+                <ul id="ai-modify-files"><li>No files proposed</li></ul>
+              </div>
+              <div class="ai-modify-diff-section">
+                <h4>Code diff preview</h4>
+                <pre id="ai-modify-diff"><code>No diff available. No code has been generated or applied.</code></pre>
+              </div>
+              <p class="ai-modify-backup-note">Future approved changes must be workspace-confined, explicitly approved, backed up before writes, and reversible.</p>
+              <div class="ai-modify-review-actions">
+                <p id="ai-modify-status" role="status" aria-live="polite">AI Modify is currently interface-only.</p>
+                <div>
+                  <button class="personalize-secondary-button" id="ai-modify-cancel" type="button">Cancel</button>
+                  <button class="personalize-secondary-button" id="ai-modify-reject" type="button">Reject</button>
+                  <button class="personalize-apply-button" id="ai-modify-approve" type="button" disabled>Approve changes</button>
+                </div>
+              </div>
+            </section>
+            <section class="ai-modify-history" aria-labelledby="ai-modify-history-title">
+              <div class="ai-modify-review-heading">
+                <h3 id="ai-modify-history-title">Request / proposal history</h3>
+                <span>LOCAL · PRIVATE METADATA ONLY</span>
+              </div>
+              <ol id="ai-modify-history"><li class="ai-modify-history-empty">No proposal activity yet.</li></ol>
+            </section>
+          </section>
+          <section class="code-studio-panel" id="code-studio-panel" aria-labelledby="code-studio-title" hidden>
+            <div class="code-studio-heading">
+              <div>
+                <span class="eyebrow">MODULE 03 / LOCAL CODE WORKSPACE</span>
+                <h2 id="code-studio-title" tabindex="-1">Code Studio</h2>
+                <p>Work with code text locally. This studio never runs code or changes project files.</p>
+              </div>
+              <button class="personalize-back-button" id="code-studio-back" type="button">Back to LAB</button>
+            </div>
+            <div class="code-studio-safety" role="note">
+              <strong>Untrusted text · never executed</strong>
+              <span>Code stays in this tab and is not sent to an AI provider. Imports are previews only; exports download a separate copy and never write into the J.A.R.V.I.S. project.</span>
+              <small>Do not paste or export API keys, passwords, tokens, or other secrets. Review any local code before sharing it.</small>
+            </div>
+            <div class="code-studio-toolbar">
+              <label for="code-studio-language">Language
+                <select id="code-studio-language">
+                  <option value="javascript">JavaScript</option>
+                  <option value="typescript">TypeScript</option>
+                  <option value="python">Python</option>
+                  <option value="html">HTML</option>
+                  <option value="css">CSS</option>
+                  <option value="json">JSON</option>
+                  <option value="markdown">Markdown</option>
+                  <option value="text">Plain text</option>
+                </select>
+              </label>
+              <span id="code-studio-highlight-status" role="status">Syntax highlighting unavailable · plain text mode</span>
+              <label class="code-studio-readonly-toggle"><input id="code-studio-readonly" type="checkbox"><span>Read-only preview</span></label>
+            </div>
+            <div class="code-studio-editor-wrap">
+              <label class="sr-only" for="code-studio-editor">Code editor text</label>
+              <textarea id="code-studio-editor" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="off" placeholder="Paste or type code here. Code is treated as untrusted text and is never executed."></textarea>
+              <div class="code-studio-editor-footer"><span id="code-studio-count">0 characters · 1 line</span><span>LOCAL TAB ONLY · NO PROJECT FILE ACCESS</span></div>
+            </div>
+            <div class="code-studio-actions">
+              <button class="personalize-secondary-button" id="code-studio-import" type="button">Import local file</button>
+              <input id="code-studio-file" type="file" accept=".js,.mjs,.cjs,.ts,.tsx,.jsx,.py,.html,.htm,.css,.json,.md,.txt" hidden>
+              <button class="personalize-secondary-button" id="code-studio-copy" type="button">Copy code</button>
+              <button class="personalize-secondary-button" id="code-studio-clear" type="button">Clear</button>
+              <button class="personalize-apply-button" id="code-studio-export" type="button">Export copy</button>
+            </div>
+            <p class="code-studio-status" id="code-studio-status" role="status" aria-live="polite">Ready for local text preview. Import and export require confirmation.</p>
+            <section class="code-studio-review" id="code-studio-review" aria-labelledby="code-studio-review-title">
+              <div class="ai-modify-review-heading">
+                <h3 id="code-studio-review-title">Local code review</h3>
+                <span>STATIC HEURISTICS · NO EXECUTION</span>
+              </div>
+              <p id="code-studio-review-summary">Paste or import code to see local, non-executing review suggestions.</p>
+              <ul id="code-studio-findings"><li>No review findings.</li></ul>
+            </section>
+          </section>
+          <section class="extensions-panel" id="extensions-panel" aria-labelledby="extensions-title" hidden>
+            <div class="extensions-heading">
+              <div>
+                <span class="eyebrow">MODULE 04 / LOCAL PACKAGE MANAGER</span>
+                <h2 id="extensions-title" tabindex="-1">Extensions</h2>
+                <p>Review package metadata and requested permissions. Managed extensions remain inert; no imported code is loaded or executed.</p>
+              </div>
+              <button class="personalize-back-button" id="extensions-back" type="button">Back to LAB</button>
+            </div>
+            <div class="extensions-safety" role="note">
+              <strong>Untrusted packages · no runtime access</strong>
+              <span>Packages are stored separately from J.A.R.V.I.S. settings. Extensions cannot access AI provider configuration, API keys, passwords, tokens, or other secrets.</span>
+              <small>Only .jarvis-extension.json and .jext JSON packages up to 512 KB are accepted. Package files are treated as data, never imported as application scripts.</small>
+            </div>
+            <div class="extensions-import-row">
+              <input id="extensions-package-file" type="file" accept=".jarvis-extension.json,.jext,application/json" hidden>
+              <button class="personalize-apply-button" id="extensions-import" type="button">Import package</button>
+              <span>Import creates a pending-review entry. Nothing is enabled until you review permissions and approve.</span>
+            </div>
+            <p class="extensions-status" id="extensions-status" role="status" aria-live="polite">No package selected.</p>
+            <section class="extensions-list-section" aria-labelledby="extensions-list-title">
+              <div class="ai-modify-review-heading">
+                <h3 id="extensions-list-title">Managed packages</h3>
+                <span id="extensions-count">0 EXTENSIONS</span>
+              </div>
+              <div class="extensions-list" id="extensions-list">
+                <p class="extensions-empty">No imported extensions.</p>
+              </div>
+            </section>
+            <section class="extensions-history-section" aria-labelledby="extensions-history-title">
+              <div class="ai-modify-review-heading">
+                <h3 id="extensions-history-title">Management history</h3>
+                <span>LOCAL · PRIVATE METADATA</span>
+              </div>
+              <ol id="extensions-history"><li class="extensions-history-empty">No extension activity yet.</li></ol>
+            </section>
+          </section>
+          <p class="lab-disclaimer">LAB STEP 06 ADDS CENTRAL SAFETY GATES. Project changes, generated-code execution, and extension execution remain disabled.</p>
+        </section>
+      </main>
+      </div>
+      <nav class="feature-toolbar" aria-label="Desktop feature shortcuts">
+        <button type="button" data-nav="chat"><svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4V5Z"/><path d="M8 9h8m-8 4h5"/></svg><span>Chat</span></button>
+        <button type="button" data-nav="voice"><svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 18v3m-4 0h8"/></svg><span>Voice</span></button>
+        <button type="button" data-nav="files"><svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6l2 2h8v12H4zM8 13h8m-8 3h6"/></svg><span>Files</span></button>
+        <button type="button" data-nav="applications"><svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="8" height="7" rx="1"/><rect x="13" y="4" width="8" height="7" rx="1"/><rect x="3" y="13" width="8" height="7" rx="1"/><rect x="13" y="13" width="8" height="7" rx="1"/></svg><span>Applications</span></button>
+        <button type="button" data-nav="system"><svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span>System</span></button>
+        <button type="button" data-nav="memory"><svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM8 8h8m-8 4h8m-8 4h5"/></svg><span>Memory</span></button>
+        <button type="button" data-nav="settings"><svg class="toolbar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="m19.4 15 .1.1a1.8 1.8 0 0 1-2.5 2.5l-.1-.1a1.8 1.8 0 0 0-3 .9v.2a1.8 1.8 0 0 1-3.6 0v-.2a1.8 1.8 0 0 0-3-.9l-.1.1a1.8 1.8 0 0 1-2.5-2.5l.1-.1a1.8 1.8 0 0 0-.9-3h-.2a1.8 1.8 0 0 1 0-3.6h.2a1.8 1.8 0 0 0 .9-3l-.1-.1a1.8 1.8 0 0 1 2.5-2.5l.1.1a1.8 1.8 0 0 0 3-.9v-.2a1.8 1.8 0 0 1 3.6 0v.2a1.8 1.8 0 0 0 3 .9l.1-.1a1.8 1.8 0 0 1 2.5 2.5l-.1.1a1.8 1.8 0 0 0 .9 3h.2a1.8 1.8 0 0 1 0 3.6h-.2a1.8 1.8 0 0 0-.9 3Z"/></svg><span>Settings</span></button>
+      </nav>
+      <nav class="mobile-nav" aria-label="Mobile navigation">
+        <button class="is-current" type="button" data-nav="dashboard"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="5" rx="1"/><rect x="13" y="10" width="8" height="11" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/></svg><span>Home</span></button>
+        <button type="button" data-nav="chat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4V5Z"/><path d="M8 9h8m-8 4h5"/></svg><span>Chat</span></button>
+        <button type="button" data-nav="voice"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 18v3m-4 0h8"/></svg><span>Voice</span></button>
+        <button type="button" data-nav="applications"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg><span>Apps</span></button>
+        <button type="button" data-nav="more"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg><span>More</span></button>
+        <button type="button" data-nav="lab" aria-label="Open J.A.R.V.I.S. LAB"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6m-5 0v6l-5.5 9.2A1.8 1.8 0 0 0 6 21h12a1.8 1.8 0 0 0 1.5-2.8L14 9V3"/><path d="M8 15h8m-6-3h4"/></svg><span>LAB</span></button>
+      </nav>
+      <footer class="footer-line"><span>J.A.R.V.I.S. <b>01</b></span><span id="footer-status">BROWSER-BASED | PERMISSION-BOUND</span></footer>
+    </div>
+
+    <dialog class="settings-dialog agent-confirm-dialog" id="agent-confirm-dialog" aria-labelledby="agent-confirm-title">
+      <form method="dialog" class="settings-content agent-confirm-content" id="agent-confirm-form">
+        <div class="settings-head"><div><span class="eyebrow" id="agent-confirm-risk">CONFIRM</span><h2 id="agent-confirm-title">Allow this agent step?</h2></div><button class="icon-button subtle" value="deny" aria-label="Deny agent step" title="Deny"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+        <p>Review the requested action before it runs.</p>
+        <strong id="agent-confirm-action"></strong>
+        <p id="agent-confirm-detail"></p>
+        <div class="setting-actions"><button class="secondary-button" value="deny">Deny</button><button class="secondary-button danger-button" value="cancel-plan">Stop plan</button><button class="secondary-button agent-allow-button" value="allow">Allow this step</button></div>
+      </form>
+    </dialog>
+    <dialog class="settings-dialog" id="settings-dialog" aria-labelledby="settings-title">
+      <form method="dialog" class="settings-head"><div><span class="eyebrow">PREFERENCES</span><h2 id="settings-title">Settings</h2></div><button class="icon-button subtle" aria-label="Close settings" title="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></form>
+      <div class="settings-content">
+        <section class="avatar-dev-settings" aria-labelledby="avatar-dev-title">
+          <div class="provider-settings-heading"><span class="eyebrow">3D PROJECTION</span><h3 id="avatar-dev-title">Avatar controls</h3></div>
+          <div class="avatar-model-controls">
+            <button class="avatar-model-button" id="activate-3d-avatar" type="button" aria-pressed="false" aria-describedby="avatar-model-status">Activate 3D Avatar</button>
+            <button class="avatar-model-button" id="activate-holographic-earth" type="button" aria-pressed="false" aria-describedby="avatar-model-status">Activate Holographic Earth</button>
+            <button class="avatar-model-button" id="load-custom-avatar" type="button" aria-describedby="avatar-model-help avatar-model-status">Load Custom Avatar</button>
+            <button class="avatar-model-button" id="toggle-hologram" type="button" aria-pressed="true">Hologram On</button>
+            <label class="hologram-quality">Quality
+              <select id="hologram-quality" aria-label="Hologram quality">
+                <option value="auto">Auto</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option>
+              </select>
+            </label>
+            <input id="avatar-model-file" type="file" accept=".vrm,.glb,model/gltf-binary" hidden>
+            <p class="avatar-model-help" id="avatar-model-help">Choose a self-contained VRM or GLB up to 20 MB. The model stays on this device.</p>
+            <p class="avatar-model-status" id="avatar-model-status" role="status" aria-live="polite"></p>
+          </div>
+        </section>
+        <section class="ai-provider-settings" aria-labelledby="ai-provider-title">
+          <div class="provider-settings-heading"><span class="eyebrow">SERVER-SIDE AI</span><h3 id="ai-provider-title">AI provider</h3><p id="ai-setup-status" class="settings-disclaimer" role="status" aria-live="polite">Checking current provider…</p></div>
+          <form id="ai-settings-form">
+            <label class="provider-field" for="ai-provider-select"><span>Provider</span><select id="ai-provider-select"><option value="gemini" selected>Google Gemini API</option><option value="openai-compatible">OpenAI-compatible API</option><option value="ollama">Ollama (local)</option></select></label>
+            <label class="provider-field" for="ai-model-input"><span>Model name</span><input id="ai-model-input" type="text" maxlength="120" autocomplete="off" spellcheck="false" value="gemini-3.8-flash" required></label>
+            <label class="provider-field" id="ai-base-url-field" for="ai-base-url"><span>Provider base URL</span><input id="ai-base-url" type="url" maxlength="2048" autocomplete="url" spellcheck="false" value="https://generativelanguage.googleapis.com/v1beta/openai/" required></label>
+            <label class="provider-field" id="ai-key-field" for="ai-api-key"><span id="ai-key-label">Provider API key</span><input id="ai-api-key" type="password" maxlength="1024" autocomplete="off" spellcheck="false" placeholder="Not saved in this browser"></label>
+            <p class="provider-help" id="ai-provider-help">For Gemini, set GEMINI_API_KEY in the server's .env file or deployment secrets. The browser does not accept or store Gemini keys.</p>
+            <div class="setting-actions"><button class="secondary-button" id="ai-settings-save" type="submit">Use temporarily</button><button class="secondary-button" id="ai-settings-environment" type="button">Use deployment environment</button></div>
+          </form>
+        </section>
+        <section class="ai-provider-settings" aria-labelledby="ai-model-manager-title">
+          <div class="provider-settings-heading"><span class="eyebrow">VERIFIED AGAINST THE ACTIVE PROVIDER</span><h3 id="ai-model-manager-title">AI Model Manager</h3><p class="settings-disclaimer">Discovered models remain untested until a small request succeeds. Model mode choices only use compatible models verified by this server session.</p></div>
+          <label class="provider-field" for="ai-model-mode"><span>Selection mode</span><select id="ai-model-mode"><option value="auto">Auto</option><option value="manual">Manual</option><option value="fast">Fast</option><option value="smart">Smart</option><option value="lightweight">Lightweight</option></select></label>
+          <div class="setting-actions"><button class="secondary-button" id="ai-model-refresh" type="button">Refresh models</button><button class="secondary-button" id="ai-model-test" type="button" disabled>Test selected model</button><button class="secondary-button" id="ai-model-use" type="button" disabled>Use selected model</button></div>
+          <p class="provider-help" id="ai-model-status" role="status" aria-live="polite">Configure a provider before discovering models.</p>
+          <ul class="ai-model-list" id="ai-model-list" aria-label="Discovered AI models"></ul>
+        </section>
+        <section class="ai-provider-settings" aria-labelledby="home-assistant-title">
+          <div class="provider-settings-heading"><span class="eyebrow">ALLOWLISTED DEVICE STATUS</span><h3 id="home-assistant-title">Home Assistant</h3><p class="settings-disclaimer">The server reads only explicitly allowlisted entities. Separately approved lights and switches can be turned on or off after confirmation.</p></div>
+          <div class="setting-actions"><button class="secondary-button" id="home-assistant-refresh" type="button">Refresh entities</button></div>
+          <p id="home-assistant-status" class="settings-disclaimer" role="status" aria-live="polite">No Home Assistant status requested.</p>
+          <ul id="home-assistant-entities" aria-label="Allowlisted Home Assistant entities"></ul>
+        </section>
+        <section class="ai-provider-settings" aria-labelledby="google-workspace-title">
+          <div class="provider-settings-heading"><span class="eyebrow">SERVER-SIDE OAUTH</span><h3 id="google-workspace-title">Google Workspace</h3><p class="settings-disclaimer">Connect Gmail and Calendar with Google OAuth. Emails are saved as drafts and are never sent. Calendar changes require confirmation.</p></div>
+          <div class="setting-actions"><button class="secondary-button" id="google-workspace-connect" type="button">Connect Google</button><button class="secondary-button" id="google-workspace-refresh" type="button">Refresh status</button><button class="secondary-button danger-button" id="google-workspace-disconnect" type="button" disabled>Disconnect</button></div>
+          <p id="google-workspace-status" class="settings-disclaimer" role="status" aria-live="polite">Google Workspace connection has not been checked.</p>
+          <form id="google-draft-form">
+            <label class="provider-field" for="google-draft-to"><span>Draft recipient</span><input id="google-draft-to" type="email" maxlength="254" autocomplete="email" required></label>
+            <label class="provider-field" for="google-draft-subject"><span>Subject</span><input id="google-draft-subject" type="text" maxlength="200" required></label>
+            <label class="provider-field" for="google-draft-body"><span>Message</span><textarea id="google-draft-body" rows="4" maxlength="12000" required></textarea></label>
+            <div class="setting-actions"><button class="secondary-button" id="google-draft-create" type="submit">Save Gmail draft</button></div>
+          </form>
+          <div class="provider-settings-heading"><h4>Upcoming events</h4></div>
+          <div class="setting-actions"><button class="secondary-button" id="google-calendar-refresh" type="button">Refresh events</button></div>
+          <ul id="google-calendar-events" aria-label="Upcoming Google Calendar events"></ul>
+          <form id="google-event-form">
+            <label class="provider-field" for="google-event-summary"><span>Event title</span><input id="google-event-summary" type="text" maxlength="200" required></label>
+            <label class="provider-field" for="google-event-start"><span>Start</span><input id="google-event-start" type="datetime-local" required></label>
+            <label class="provider-field" for="google-event-end"><span>End</span><input id="google-event-end" type="datetime-local" required></label>
+            <label class="provider-field" for="google-event-description"><span>Description</span><textarea id="google-event-description" rows="3" maxlength="2000"></textarea></label>
+            <div class="setting-actions"><button class="secondary-button" id="google-event-create" type="submit">Create calendar event</button></div>
+          </form>
+        </section>
+        <section class="ai-provider-settings" aria-labelledby="telegram-title">
+          <div class="provider-settings-heading"><span class="eyebrow">SERVER-ALLOWLISTED MESSAGING</span><h3 id="telegram-title">Telegram</h3><p class="settings-disclaimer">The server sends plain-text messages only to administrator-approved chats. Every message requires confirmation.</p></div>
+          <div class="setting-actions"><button class="secondary-button" id="telegram-refresh" type="button">Refresh recipients</button></div>
+          <p id="telegram-status" class="settings-disclaimer" role="status" aria-live="polite">Telegram configuration has not been checked.</p>
+          <form id="telegram-send-form">
+            <label class="provider-field" for="telegram-recipient"><span>Approved recipient</span><select id="telegram-recipient" required><option value="">Choose a recipient</option></select></label>
+            <label class="provider-field" for="telegram-message"><span>Message</span><textarea id="telegram-message" rows="4" maxlength="4096" required></textarea></label>
+            <div class="setting-actions"><button class="secondary-button" id="telegram-send" type="submit" disabled>Send Telegram message</button></div>
+          </form>
+        </section>
+        <section class="ai-provider-settings" aria-labelledby="facebook-messenger-title">
+          <div class="provider-settings-heading"><span class="eyebrow">SERVER-ALLOWLISTED MESSAGING</span><h3 id="facebook-messenger-title">Facebook Messenger</h3><p class="settings-disclaimer">Only plain-text replies to administrator-approved recipients are available. The recipient must have messaged your Page recently enough to meet Meta's messaging window; every send requires confirmation.</p></div>
+          <div class="setting-actions"><button class="secondary-button" id="facebook-messenger-refresh" type="button">Refresh recipients</button></div>
+          <p id="facebook-messenger-status" class="settings-disclaimer" role="status" aria-live="polite">Facebook Messenger configuration has not been checked.</p>
+          <form id="facebook-messenger-send-form">
+            <label class="provider-field" for="facebook-messenger-recipient"><span>Approved recipient</span><select id="facebook-messenger-recipient" required><option value="">Choose a recipient</option></select></label>
+            <label class="provider-field" for="facebook-messenger-message"><span>Message</span><textarea id="facebook-messenger-message" rows="4" maxlength="2000" required></textarea></label>
+            <div class="setting-actions"><button class="secondary-button" id="facebook-messenger-send" type="submit" disabled>Send Messenger reply</button></div>
+          </form>
+        </section>
+        <section class="share-settings" aria-labelledby="share-title">
+          <div class="provider-settings-heading"><span class="eyebrow">J.A.R.V.I.S.</span><h3 id="share-title">Share JARVIS</h3></div>
+          <p class="settings-disclaimer">Share copies only this app's public address. API keys, access keys, chat history, and preferences are never added to the link. A public app shares its server: configure APP_ACCESS_TOKEN before exposing it. Recipients then need that access key separately; never put it in the link.</p>
+          <div class="setting-actions"><button class="secondary-button" id="share-link-button" type="button">Share Link</button><button class="secondary-button" id="copy-link-button" type="button">Copy Link</button></div>
+          <p class="share-status" id="share-status" role="status" aria-live="polite"></p>
+        </section>
+        <label class="setting-row access-row" for="access-token"><span><strong>Server access key</strong><small>Only needed when the server administrator enabled access protection. Kept in memory until this tab closes.</small></span><input id="access-token" type="password" autocomplete="off" spellcheck="false" placeholder="Optional access key"></label>
+        <label class="setting-row" for="language-select"><span><strong>Conversation language</strong><small>Used for AI replies and voice recognition</small></span><select id="language-select"><option value="en">English</option><option value="hi">Hindi</option></select></label>
+        <label class="setting-row" for="voice-select"><span><strong>Speech voice</strong><small id="voice-support">Available voices depend on your device</small></span><select id="voice-select"><option value="">System default</option></select></label>
+        <div class="setting-row speech-audio-row">
+          <span><strong>Preview audio from this device</strong><small>Choose a local audio file to listen to. It is not uploaded or used for assistant replies.</small></span>
+          <div class="speech-audio-controls">
+            <div class="speech-audio-actions">
+              <label class="secondary-button speech-audio-picker">Choose audio<input class="sr-only" id="speech-audio-file" type="file" accept="audio/*" aria-describedby="speech-audio-status"></label>
+              <button class="secondary-button" id="speech-audio-clear" type="button" hidden>Clear</button>
+            </div>
+            <small id="speech-audio-status" role="status" aria-live="polite">No audio selected</small>
+            <audio id="speech-audio-preview" controls preload="metadata" hidden></audio>
+          </div>
+        </div>
+        <label class="setting-row range-row" for="speech-rate"><span><strong>Speech speed</strong><small><span id="speech-rate-value">1.0</span>x playback rate</small></span><input id="speech-rate" type="range" min="0.7" max="1.3" step="0.1" value="1"></label>
+        <div class="setting-row"><span><strong>Natural voice (OmniVoice)</strong><small id="local-tts-status">Checking local voice engine…</small></span><label class="switch"><input id="local-tts-enabled" type="checkbox" disabled><span></span><b class="sr-only">Use OmniVoice natural voice when available</b></label></div>
+        <div class="setting-row"><span><strong>Voice output</strong><small>Speak assistant replies aloud</small></span><label class="switch"><input id="voice-enabled" type="checkbox"><span></span><b class="sr-only">Enable voice output</b></label></div>
+        <div class="setting-row"><span><strong>Wake-word detection</strong><small id="wake-word-support">Say "Hey JARVIS" or "हे जार्विस" while this app is open. Requires microphone permission; browser support varies.</small></span><label class="switch"><input id="wake-word-enabled" type="checkbox"><span></span><b class="sr-only">Enable wake-word detection</b></label></div>
+        <div class="setting-row"><span><strong>Save conversation history</strong><small>Stored only in this browser on this device</small></span><label class="switch"><input id="memory-enabled" type="checkbox" checked><span></span><b class="sr-only">Save conversation history</b></label></div>
+        <div class="setting-row"><span><strong>Use approved Smart Memories</strong><small>Only memories you review and approve are considered for relevant AI replies. Stored locally.</small></span><label class="switch"><input id="smart-memory-enabled" type="checkbox"><span></span><b class="sr-only">Use approved Smart Memories</b></label></div>
+        <div class="setting-actions"><button class="secondary-button" id="preview-voice" type="button">Preview voice</button><button class="secondary-button" id="more-tools-button" type="button">More tools</button><button class="secondary-button danger-button" id="settings-clear" type="button">Clear saved data</button></div>
+        <p class="settings-disclaimer">Gemini Live sends microphone audio to Google only while a Live voice session is active. The server uses a short-lived token; the permanent API key never reaches the browser. Other providers use browser speech when available. Microphone access and available system voices are controlled by your browser and operating system.</p>
+      </div>
+    </dialog>
+    <dialog class="settings-dialog install-dialog" id="install-help" aria-labelledby="install-title">
+      <form method="dialog" class="settings-head"><div><span class="eyebrow">INSTALL J.A.R.V.I.S.</span><h2 id="install-title">Add to your device</h2></div><button class="icon-button subtle" aria-label="Close installation help" title="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></form>
+      <div class="settings-content"><p class="install-instructions" id="install-instructions"></p><p class="settings-disclaimer">PWA installation needs HTTPS (or localhost). On iPhone/iPad, use Safari's Share menu and choose Add to Home Screen. Windows users can also install the separate desktop app using the instructions in the project README.</p></div>
+    </dialog>
+    <dialog class="settings-dialog" id="file-search-dialog" aria-labelledby="file-search-title">
+      <form method="dialog" class="settings-head"><div><span class="eyebrow">LOCAL ATTACHMENTS</span><h2 id="file-search-title">Search files</h2></div><button class="icon-button subtle" aria-label="Close file search" title="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></form>
+      <div class="settings-content"><label class="sr-only" for="file-search-query">Search attached files</label><input class="dialog-search-input" id="file-search-query" type="search" placeholder="Search text in attached files"><div class="file-search-results" id="file-search-results" aria-live="polite"></div><p class="settings-disclaimer">Search is limited to text files attached in this browser's saved conversation history.</p></div>
+    </dialog>
+    <dialog class="settings-dialog" id="history-dialog" aria-labelledby="history-title">
+      <form method="dialog" class="settings-head"><div><span class="eyebrow">THIS DEVICE</span><h2 id="history-title">Conversation history</h2></div><button class="icon-button subtle" aria-label="Close history" title="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></form>
+      <div class="settings-content"><p class="settings-disclaimer" id="history-count"></p><div class="history-list" id="history-list"></div><button class="secondary-button" id="history-open-chat" type="button">Return to current conversation</button></div>
+    </dialog>
+    <dialog class="settings-dialog app-hub-dialog" id="application-dialog" aria-labelledby="application-title">
+      <form method="dialog" class="settings-head"><div><span class="eyebrow">PERSONAL LAUNCHER</span><h2 id="application-title">JARVIS APP HUB</h2></div><button class="icon-button subtle" aria-label="Close App Hub" title="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></form>
+      <section class="settings-content app-hub-dialog-content" data-app-hub>
+        <div class="app-hub-dialog-toolbar"><p class="app-hub-note">Shortcuts stay on this device. Android app launching depends on your browser and installed apps.</p><div class="app-hub-dialog-actions"><button class="app-hub-add" type="button" data-hub-action="vision" data-requires-full-access title="Enable Full Access to use Vision">Vision</button><button class="app-hub-add" type="button" data-hub-action="add">Add App</button></div></div>
+        <label class="sr-only" for="app-hub-search-dialog">Search saved apps</label>
+        <input id="app-hub-search-dialog" class="app-hub-search" data-hub-search type="search" placeholder="Search My Apps">
+        <div class="app-hub-list app-hub-dialog-list" data-hub-apps aria-live="polite"></div>
+        <form class="app-hub-form" data-hub-form hidden>
+          <strong class="app-hub-form-title">Add or edit shortcut</strong>
+          <label>Name<input data-hub-field="name" maxlength="32" autocomplete="off" required></label>
+          <label>Website, Android app, call, or message link<input data-hub-field="url" type="text" inputmode="url" maxlength="2048" placeholder="https://example.com, tel:+15551234567, or sms:+15551234567?body=Hello" required></label>
+          <label>Fallback website (optional)<input data-hub-field="fallback" type="text" inputmode="url" maxlength="2048" placeholder="https://example.com"></label>
+          <label>App icon (optional)<input data-hub-field="icon" type="file" accept="image/png,image/jpeg,image/webp"></label>
+          <span class="app-hub-icon-status" data-hub-icon-status>PNG, JPEG, or WebP; up to 256 KB.</span>
+          <div class="app-hub-form-actions"><button class="app-hub-primary" type="submit">Save shortcut</button><button type="button" data-hub-action="cancel">Cancel</button></div>
+        </form>
+        <form class="app-hub-runner app-hub-dialog-runner" data-hub-runner>
+          <label>URL Runner<input data-hub-field="run-url" type="text" inputmode="url" maxlength="2048" placeholder="Website, intent://, tel:, or sms: link" required></label>
+          <label class="sr-only" for="app-hub-run-fallback-dialog">Optional fallback website</label>
+          <input id="app-hub-run-fallback-dialog" data-hub-field="run-fallback" type="text" inputmode="url" maxlength="2048" placeholder="Optional fallback website">
+          <button class="app-hub-primary" type="submit">Open / Run</button>
+          <button class="app-hub-primary" type="button" data-hub-action="copy-text">Copy text</button>
+        </form>
+        <p class="app-hub-status" data-hub-status role="status" aria-live="polite"></p>
+        <p class="app-hub-safety">Only HTTP/HTTPS websites and explicit Android intent links are accepted. APKs or native applications cannot run inside JARVIS; uploaded files are restricted to image icons and are never executed.</p>
+      </section>
+    </dialog>
+    <dialog class="settings-dialog" id="browser-research-dialog" aria-labelledby="browser-research-title">
+      <form method="dialog" class="settings-head"><div><span class="eyebrow">READ-ONLY WEB RESEARCH</span><h2 id="browser-research-title">Research a public page</h2></div><button class="icon-button subtle" id="browser-research-close" aria-label="Close Browser Research" title="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></form>
+      <div class="settings-content">
+        <p class="settings-disclaimer">J.A.R.V.I.S. reads the page you provide. It will not click, submit forms, download files, or change account state.</p>
+        <form id="browser-research-form">
+          <label for="browser-research-url">Public page URL<input id="browser-research-url" type="url" maxlength="2048" inputmode="url" autocomplete="url" placeholder="https://example.com/article" required></label>
+          <label for="browser-research-question">Research question<textarea id="browser-research-question" rows="3" maxlength="2000" placeholder="What would you like to know about this page?" required></textarea></label>
+          <div class="setting-actions"><button class="secondary-button" id="browser-research-submit" type="submit">Research page</button><button class="secondary-button danger-button" id="browser-research-stop" type="button" hidden disabled>Stop</button></div>
+        </form>
+        <p class="assistant-feedback" id="browser-research-status" role="status" aria-live="polite"></p>
+        <pre id="browser-research-result" hidden></pre>
+        <a id="browser-research-source" class="secondary-button" href="#" target="_blank" rel="noopener noreferrer" hidden>Open source page</a>
+      </div>
+    </dialog>
+    <dialog class="settings-dialog" id="screen-capture-dialog" aria-labelledby="screen-capture-title">
+      <form method="dialog" class="settings-head"><div><span class="eyebrow">PERMISSION REQUIRED</span><h2 id="screen-capture-title">JARVIS Vision</h2></div><button class="icon-button subtle" id="close-capture-dialog" aria-label="Close Vision" title="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></form>
+      <div class="settings-content">
+        <p class="settings-disclaimer">Choose a screen or window, or request camera access. Capture makes one local preview; J.A.R.V.I.S. receives it only after you press Send. Camera capture does not include audio.</p>
+        <video id="capture-preview" autoplay muted playsinline hidden></video>
+        <img id="capture-frame-preview" alt="Local preview of the captured screen frame" hidden>
+        <canvas id="capture-canvas" hidden></canvas>
+        <label class="vision-question" for="vision-question">Ask about this frame<textarea id="vision-question" rows="2" maxlength="500" placeholder="What should J.A.R.V.I.S. look at?" disabled></textarea></label>
+        <div class="setting-actions">
+          <button class="secondary-button" id="capture-frame-button" type="button" disabled>Capture one frame</button>
+          <button class="secondary-button" id="camera-capture-button" type="button">Use camera</button>
+          <button class="secondary-button" id="vision-send-button" type="button" disabled>Send to J.A.R.V.I.S.</button>
+          <a class="secondary-button" id="download-capture" hidden download="jarvis-screen-capture.jpg">Download preview</a>
+          <button class="secondary-button danger-button" id="stop-capture-button" type="button" disabled>Emergency Stop</button>
+        </div>
+        <p class="assistant-feedback" id="capture-status" role="status" aria-live="polite"></p>
+      </div>
+    </dialog>
+    <dialog class="settings-dialog" id="more-navigation-dialog" aria-labelledby="more-navigation-title">
+      <form method="dialog" class="settings-head"><div><span class="eyebrow">WORKSPACE</span><h2 id="more-navigation-title">More tools</h2></div><button class="icon-button subtle" aria-label="Close more tools" title="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></form>
+      <div class="settings-content more-navigation-list">
+        <div class="access-control mobile-access-control"><div class="access-copy"><span>FULL ACCESS</span><small>Explicit in-app actions</small></div><label class="switch"><input id="full-access-mobile-toggle" type="checkbox"><span></span><b class="sr-only">Enable in-app quick actions</b></label></div>
+        <button class="nav-item" type="button" data-nav="history">Conversation history</button>
+        <button class="nav-item" type="button" data-nav="files">Files</button>
+        <button class="nav-item" type="button" data-nav="applications">Applications</button>
+        <button class="nav-item" type="button" data-nav="study">Study mode</button>
+        <button class="nav-item" type="button" data-nav="productivity">Productivity</button>
+        <button class="nav-item" type="button" data-nav="system">System monitor</button>
+        <button class="nav-item" type="button" data-nav="news" data-requires-full-access>News &amp; Briefing</button>
+        <button class="nav-item" type="button" data-nav="activity">Activity feed</button>
+        <button class="nav-item" type="button" data-nav="memory">Memory</button>
+        <button class="nav-item" type="button" data-nav="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="m19.4 15 .1.1a1.8 1.8 0 0 1-2.5 2.5l-.1-.1a1.8 1.8 0 0 0-3 .9v.2a1.8 1.8 0 0 1-3.6 0v-.2a1.8 1.8 0 0 0-3-.9l-.1.1a1.8 1.8 0 0 1-2.5-2.5l.1-.1a1.8 1.8 0 0 0-.9-3h-.2a1.8 1.8 0 0 1 0-3.6h.2a1.8 1.8 0 0 0 .9-3l-.1-.1a1.8 1.8 0 0 1 2.5-2.5l.1.1a1.8 1.8 0 0 0 3-.9v-.2a1.8 1.8 0 0 1 3.6 0v.2a1.8 1.8 0 0 0 3 .9l.1-.1a1.8 1.8 0 0 1 2.5 2.5l-.1.1a1.8 1.8 0 0 0 .9 3h.2a1.8 1.8 0 0 1 0 3.6h-.2a1.8 1.8 0 0 0-.9 3Z"/></svg><span>Settings</span></button>
+      </div>
+    </dialog>
+    <aside class="runtime-diagnostics is-speech-diagnostics" id="runtime-diagnostics" hidden aria-label="Android speech diagnostics">
+      <div class="runtime-diagnostics-heading">
+        <strong>Temporary Android Speech Diagnostics</strong>
+        <button id="close-runtime-diagnostics" type="button" aria-label="Close diagnostics">Close</button>
+      </div>
+      <pre id="runtime-diagnostics-output" aria-live="polite"></pre>
+    </aside>
+    <script src="/runtime-config.js"></script>
+    <script src="/diagnostics.js?hud=28"></script>
+    <script src="/app.js?avatar=67" type="module"></script>
+  </body>
+</html>
