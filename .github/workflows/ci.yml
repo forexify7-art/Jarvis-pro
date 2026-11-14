@@ -146,3 +146,55 @@ jobs:
           path: dist-desktop/JARVIS-Setup-x64.exe
           if-no-files-found: error
           retention-days: 7
+
+  live-integration-checks:
+    if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+    name: Read-only live integration checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Materialize encrypted Google authorization, if configured
+        env:
+          GOOGLE_TOKEN_STORE_ENC: ${{ secrets.GOOGLE_TOKEN_STORE_ENC }}
+        run: |
+          if [ -z "$GOOGLE_TOKEN_STORE_ENC" ]; then
+            exit 0
+          fi
+          install -d -m 700 .data
+          umask 077
+          printf '%s' "$GOOGLE_TOKEN_STORE_ENC" > .data/google-workspace.tokens.enc
+          unset GOOGLE_TOKEN_STORE_ENC
+
+      - name: Run read-only checks
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REDIRECT_URI: ${{ secrets.GOOGLE_REDIRECT_URI }}
+          APP_ENCRYPTION_KEY: ${{ secrets.APP_ENCRYPTION_KEY }}
+          GOOGLE_TOKEN_FILE: .data/google-workspace.tokens.enc
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ALLOWED_CHAT_IDS: ${{ secrets.TELEGRAM_ALLOWED_CHAT_IDS }}
+          FACEBOOK_PAGE_ID: ${{ secrets.FACEBOOK_PAGE_ID }}
+          FACEBOOK_PAGE_ACCESS_TOKEN: ${{ secrets.FACEBOOK_PAGE_ACCESS_TOKEN }}
+          FACEBOOK_GRAPH_API_VERSION: ${{ secrets.FACEBOOK_GRAPH_API_VERSION }}
+          FACEBOOK_ALLOWED_RECIPIENT_IDS: ${{ secrets.FACEBOOK_ALLOWED_RECIPIENT_IDS }}
+          HOME_ASSISTANT_URL: ${{ secrets.HOME_ASSISTANT_URL }}
+          HOME_ASSISTANT_TOKEN: ${{ secrets.HOME_ASSISTANT_TOKEN }}
+          HOME_ASSISTANT_ENTITIES: ${{ secrets.HOME_ASSISTANT_ENTITIES }}
+        run: npm run test:integrations:live
+
+      - name: Remove temporary Google authorization file
+        if: always()
+        run: |
+          if [ -f .data/google-workspace.tokens.enc ]; then
+            rm -f -- .data/google-workspace.tokens.enc
+          fi
