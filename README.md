@@ -96,6 +96,16 @@ The optional Telegram connector sends plain-text messages only to numeric chat I
 
 The optional connector sends plain-text replies through your Facebook Page to numeric Page-scoped recipient IDs explicitly listed in `FACEBOOK_ALLOWED_RECIPIENT_IDS`. Configure `FACEBOOK_PAGE_ID`, `FACEBOOK_PAGE_ACCESS_TOKEN`, and a Meta-supported `FACEBOOK_GRAPH_API_VERSION` as server secrets; never expose the Page token to the browser. Settings shows the allowlisted recipients and asks you to confirm each exact message; sends are limited to three per minute. The recipient must have messaged the Page within Meta's standard 24-hour messaging window. The integration does not read or monitor inboxes, send unsolicited messages, or implement other message types. A live Meta app/Page has not been configured or verified.
 
+### Read-only live integration checks
+
+Keep credentials in an ignored local `.env` file or the deployment's secret manager; never add real values to `.env.example`, source code, issue reports, or logs. `.env` and Google token storage under `.data/` are excluded from Git. Configure only the integrations you want to check, then run:
+
+```sh
+npm run test:integrations:live
+```
+
+The command reports `NOT VERIFIED` when required credentials/settings or a connected Google OAuth account are unavailable, `FAIL` when a configured check is rejected or unreachable, and `PASS` only after a read-only upstream check succeeds. It checks Gemini model-list access, one Google Calendar event-list request (maximum one result), Telegram bot identity, Facebook Page identity, and Home Assistant API availability. It does not send messages, create drafts/events, or control devices. Output suppresses upstream bodies and error details. Run it from the server environment that can reach the integrations; Google OAuth must first be connected in Settings.
+
 On Linux, Playwright also needs its Chromium system libraries. If the browser exits before tests start, install the libraries using the OS package manager or `npx playwright install --with-deps chromium` in an environment where system package installation is authorized.
 
 ### GitHub Codespaces and phone

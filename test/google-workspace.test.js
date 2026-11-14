@@ -87,6 +87,25 @@ test('uses one-time PKCE OAuth state and encrypts refresh tokens with owner-only
   }
 });
 
+test('checks Google connectivity with a read-only bounded Calendar request', async () => {
+  const fixture = await createFixture();
+  try {
+    const { authorizationUrl } = fixture.workspace.startAuthorization();
+    await fixture.workspace.completeAuthorization({
+      code: 'authorization-code',
+      state: new URL(authorizationUrl).searchParams.get('state'),
+    });
+
+    assert.deepEqual(await fixture.workspace.checkConnection(), { connected: true });
+    const request = fixture.requests.find(({ url }) => url.includes('/calendar/v3/calendars/primary/events'));
+    assert.equal(new URL(request.url).searchParams.get('maxResults'), '1');
+    assert.equal(request.options.method, 'GET');
+    assert.equal(request.options.headers.authorization, 'Bearer access-token-secret');
+  } finally {
+    await rm(fixture.directory, { recursive: true, force: true });
+  }
+});
+
 test('creates Gmail drafts, reads bounded calendar ranges, and requires confirmation for event writes', async () => {
   const fixture = await createFixture();
   try {

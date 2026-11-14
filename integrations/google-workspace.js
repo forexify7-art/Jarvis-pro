@@ -252,6 +252,14 @@ export function createGoogleWorkspace({
       };
     },
 
+    async checkConnection() {
+      const result = await googleApi('/calendar/v3/calendars/primary/events?maxResults=1');
+      if (!Array.isArray(result.items)) {
+        throw integrationError('Google Calendar returned an invalid response.', 502, 'GOOGLE_UPSTREAM_INVALID_RESPONSE');
+      }
+      return { connected: true };
+    },
+
     startAuthorization() {
       const configuration = getConfiguration();
       const timestamp = now();

@@ -20,6 +20,7 @@
     "build:avatar": "esbuild public/avatar3d.js --bundle --format=esm --minify --legal-comments=inline --outfile=public/avatar3d.bundle.js",
     "pretest": "npm run build:avatar",
     "test": "node --test",
+    "test:integrations:live": "node --env-file-if-exists=.env scripts/live-integration-check.js",
     "test:browser": "playwright test",
     "test:browser:desktop": "playwright test --project=desktop-chromium",
     "test:browser:mobile": "playwright test --project=android-mobile",
