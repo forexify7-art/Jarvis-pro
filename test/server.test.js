@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { request as httpRequest } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { createAppServer, getAssistantText } from '../server.js';
+import { containsAsciiControlCharacters } from '../public/ascii-controls.js';
 import { getForwardedUrl, getServerEnvironment } from '../scripts/codespaces.js';
 import { detectDeviceProfile } from '../public/device-monitor.js';
 
@@ -1320,7 +1321,7 @@ test('reports rejected OpenAI-compatible provider keys without treating them as 
         error: {
           code: 401,
           status: 'UNAUTHENTICATED',
-          message: `API key ${apiKey} rejected. Authorization: Bearer ${echoedToken}`,
+          message: `API key ${apiKey} rejected.\u0001 Authorization: Bearer ${echoedToken}`,
         },
       }), { status: 401 });
     }
@@ -1337,6 +1338,7 @@ test('reports rejected OpenAI-compatible provider keys without treating them as 
     assert.equal(result.code, 'UNAUTHENTICATED');
     assert.match(result.error, /API key \[redacted\] rejected/i);
     assert.match(result.error, /redacted credential/i);
+    assert.equal(containsAsciiControlCharacters(result.error), false);
     assert.doesNotMatch(JSON.stringify(result), new RegExp(apiKey));
     assert.doesNotMatch(JSON.stringify(result), new RegExp(echoedToken));
   } finally {

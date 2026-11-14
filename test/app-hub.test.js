@@ -29,6 +29,8 @@ test('normalizes web URLs and rejects unsafe protocols or embedded credentials',
     'ftp://example.com',
     'https://user:password@example.com',
     'https://example.com/a b',
+    'https://exam\u0000ple.com',
+    'https://example.com/\u007f',
   ]) {
     assert.throws(() => normalizeWebUrl(value), TypeError, value);
   }
@@ -69,6 +71,9 @@ test('normalizes tel links for the dialer and sms links for a reviewed message d
 
   const emptyDraft = parseAppDestination('sms:+15551234567');
   assert.equal(emptyDraft.url, 'sms:+15551234567');
+
+  const tabbedDraft = parseAppDestination('sms:+15551234567?body=Meet%09me');
+  assert.equal(new URL(tabbedDraft.url).searchParams.get('body'), 'Meet\tme');
 });
 
 test('rejects unsafe call and message URI parameters and invalid phone numbers', () => {
@@ -78,6 +83,8 @@ test('rejects unsafe call and message URI parameters and invalid phone numbers',
     'sms:5551234567?to=5557654321',
     'sms:5551234567?body=one&body=two',
     'sms:5551234567?body=ok#fragment',
+    'sms:5551234567?body=bad%0Bcontrol',
+    'sms:5551234567?body=bad%7Fcontrol',
     `sms:5551234567?body=${'x'.repeat(2_001)}`,
     'javascript:alert(1)',
   ]) {

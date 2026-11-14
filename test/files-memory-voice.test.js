@@ -8,10 +8,13 @@ import { createInterruptionController } from '../public/voice-interruption.js';
 
 test('file names and zip paths reject traversal and odd types', () => {
   assert.equal(validateFileName('notes.txt').valid, true);
-  for (const bad of ['../x.txt', 'a/b.txt', '.env', 'run.exe', '', 'a'.repeat(101) + '.txt']) assert.equal(validateFileName(bad).valid, false, bad);
+  for (const bad of ['../x.txt', 'a/b.txt', '.env', 'run.exe', '', 'a'.repeat(101) + '.txt', 'bad\u0000.txt', 'bad\u001f.txt']) {
+    assert.equal(validateFileName(bad).valid, false, bad);
+  }
   assert.equal(isSafeZipPath('src/app.js'), true);
   assert.equal(isSafeZipPath('../evil'), false);
   assert.equal(isSafeZipPath('/abs'), false);
+  assert.equal(isSafeZipPath('src/\u0001app.js'), false);
 });
 
 test('createFile/editFile produce real bytes and refuse empty content', () => {

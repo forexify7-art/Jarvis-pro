@@ -22,17 +22,6 @@ export default [
     },
   },
   {
-    files: [
-      'public/app-hub.js',
-      'public/file-manager.js',
-      'public/lab-safety.js',
-      'server.js',
-    ],
-    rules: {
-      'no-control-regex': 'off',
-    },
-  },
-  {
     files: ['voice/live-audio-processor.js'],
     languageOptions: {
       globals: {

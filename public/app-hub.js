@@ -1,3 +1,5 @@
+import { containsAsciiControlCharacters } from './ascii-controls.js';
+
 const STORAGE_KEY = 'jarvis.app-hub.v1';
 const MAX_SHORTCUTS = 60;
 const MAX_ICON_BYTES = 256_000;
@@ -14,7 +16,7 @@ const defaultShortcuts = [
 export function normalizeWebUrl(value) {
   if (typeof value !== 'string') throw new TypeError('Enter an HTTP or HTTPS website address.');
   const trimmed = value.trim();
-  if (!trimmed || trimmed.length > 2_048 || /[\u0000-\u0020\u007f]/.test(trimmed)) {
+  if (!trimmed || trimmed.length > 2_048 || containsAsciiControlCharacters(trimmed, { includeSpace: true })) {
     throw new TypeError('Enter a valid website address without spaces or control characters.');
   }
   const candidate = /^[a-z][a-z\d+.-]*:/i.test(trimmed) ? trimmed : `https://${trimmed}`;
@@ -61,7 +63,7 @@ function parsePhoneAction(trimmed, fallbackValue) {
     throw new TypeError('Message links may include only one body parameter and no fragment.');
   }
   const body = url.searchParams.get('body') || '';
-  if (body.length > 2_000 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(body)) {
+  if (body.length > 2_000 || containsAsciiControlCharacters(body, { allowTab: true, allowLineFeed: true })) {
     throw new TypeError('Message drafts must be under 2,000 characters and cannot contain control characters.');
   }
   const messageQuery = body ? `?${new URLSearchParams({ body })}` : '';
@@ -72,7 +74,7 @@ export function parseAppDestination(value, fallbackValue = '') {
   if (typeof value !== 'string') throw new TypeError('Enter a website URL or supported Android intent link.');
   const trimmed = value.trim();
   const phoneAction = /^(?:tel|sms):/i.test(trimmed);
-  if (trimmed.length > 2_048 || /[\u0000-\u001f\u007f]/.test(trimmed) || (!phoneAction && /\u0020/.test(trimmed))) {
+  if (trimmed.length > 2_048 || containsAsciiControlCharacters(trimmed) || (!phoneAction && trimmed.includes(' '))) {
     throw new TypeError('The destination URL is too long or contains invalid characters.');
   }
 
@@ -150,7 +152,7 @@ export function normalizeShortcut(value) {
     throw new TypeError('Shortcut details are invalid.');
   }
   const name = typeof value.name === 'string' ? value.name.trim() : '';
-  if (!name || name.length > 32 || /[\u0000-\u001f\u007f]/.test(name)) {
+  if (!name || name.length > 32 || containsAsciiControlCharacters(name)) {
     throw new TypeError('Enter an app name between 1 and 32 characters.');
   }
   const destination = parseAppDestination(value.url, value.fallbackUrl || '');

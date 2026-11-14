@@ -1,3 +1,5 @@
+import { containsAsciiControlCharacters } from './ascii-controls.js';
+
 // Local file helpers: read text/JSON/CSV/Markdown and ZIP, create and export files.
 // Dependency-free. ZIP inflate uses the browser/Node built-in DecompressionStream.
 export const MAX_READ_BYTES = 5 * 1024 * 1024;
@@ -13,7 +15,7 @@ export function getExtension(name) {
 
 export function validateFileName(name) {
   if (typeof name !== 'string' || !name || name.length > 100) return { valid: false, reason: 'File name must be 1 to 100 characters.' };
-  if (/[\\/:*?"<>|\u0000-\u001f]/.test(name) || name.startsWith('.') || name.includes('..')) {
+  if (/[\\/:*?"<>|]/.test(name) || containsAsciiControlCharacters(name) || name.startsWith('.') || name.includes('..')) {
     return { valid: false, reason: 'File name cannot contain path separators, "..", or special characters.' };
   }
   if (!MIME_BY_EXTENSION[getExtension(name)]) return { valid: false, reason: 'Unsupported file type. Use txt, md, json, csv, html, js, css, xml, yml, or zip.' };
@@ -22,7 +24,8 @@ export function validateFileName(name) {
 
 export function isSafeZipPath(path) {
   return typeof path === 'string' && path.length > 0 && path.length <= 240
-    && !path.startsWith('/') && !path.includes('\\') && !/(^|\/)\.\.(\/|$)/.test(path) && !/[:\u0000-\u001f]/.test(path);
+    && !path.startsWith('/') && !path.includes('\\') && !/(^|\/)\.\.(\/|$)/.test(path)
+    && !path.includes(':') && !containsAsciiControlCharacters(path);
 }
 
 async function inflateRaw(bytes) {

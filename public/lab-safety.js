@@ -1,3 +1,5 @@
+import { containsAsciiControlCharacters } from './ascii-controls.js';
+
 export const LAB_PROJECT_CHANGES_ENABLED = false;
 export const LAB_SAFETY_STORAGE_NAME = 'separate-backup-store';
 
@@ -33,7 +35,7 @@ export function containsSensitiveText(value) {
 export function validateWorkspaceRelativePath(value) {
   if (typeof value !== 'string' || !value || value.length > 240
     || value.startsWith('/') || value.startsWith('\\')
-    || value.includes('\\') || value.includes('%') || /[:\u0000-\u001f]/.test(value)) {
+    || value.includes('\\') || value.includes('%') || value.includes(':') || containsAsciiControlCharacters(value)) {
     return { valid: false, reason: 'Only canonical relative paths inside the project workspace are allowed.' };
   }
   const segments = value.split('/');

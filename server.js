@@ -9,6 +9,7 @@ import { createHomeAssistantClient, readHomeAssistantConfiguration } from './int
 import { createGoogleWorkspace } from './integrations/google-workspace.js';
 import { createFacebookMessengerClient } from './integrations/facebook-messenger.js';
 import { createTelegramClient } from './integrations/telegram.js';
+import { containsAsciiControlCharacters, replaceAsciiControlCharacters } from './public/ascii-controls.js';
 
 const root = resolve(fileURLToPath(new URL('./public', import.meta.url)));
 const voiceRoot = resolve(fileURLToPath(new URL('./voice', import.meta.url)));
@@ -366,7 +367,7 @@ function isValidOllamaModelName(value) {
 }
 
 function validateEnvironmentApiKey(value) {
-  if (typeof value !== 'string' || !value.trim() || value.length > 1_024 || /[\u0000-\u001f\u007f]/.test(value)) {
+  if (typeof value !== 'string' || !value.trim() || value.length > 1_024 || containsAsciiControlCharacters(value)) {
     throw Object.assign(new Error('The AI API key configured in the server environment is invalid.'), {
       status: 500,
       code: 'INVALID_AI_PROVIDER_CONFIG',
@@ -677,8 +678,7 @@ function sanitizeProviderErrorMessage(message, apiKey, status) {
     return `AI provider returned HTTP ${status}. Check the model and provider settings.`;
   }
 
-  let sanitized = message
-    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+  let sanitized = replaceAsciiControlCharacters(message)
     .replace(/\b(?:authorization|proxy-authorization)\s*[:=]\s*bearer\s+[^\s,;]+/gi, '[redacted credential]')
     .replace(/\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret)\s*[:=]\s*["']?[^"'\s,;]+["']?/gi, '[redacted credential]')
     .replace(/\b(?:authorization|api[_-]?key)\s*[:=]\s*(?:bearer\s+)?[^\s,;]+/gi, '[redacted credential]')
