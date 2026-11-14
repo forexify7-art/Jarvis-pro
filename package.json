@@ -8,7 +8,7 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env server.js",
     "desktop": "electron .",
-    "desktop:dist": "electron-builder --win nsis",
+    "desktop:dist": "electron-builder --win nsis --publish never",
     "predesktop": "npm run build:avatar",
     "predesktop:dist": "npm run build:avatar",
     "prestart": "npm run build:avatar",
@@ -47,7 +47,6 @@
   "overrides": {
     "electron-builder": {
       "app-builder-lib": {
-        "minimatch": "^11.0.1",
         "@electron/universal": {
           "minimatch": "^11.0.1"
         }
