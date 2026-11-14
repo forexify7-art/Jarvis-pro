@@ -1,0 +1,4 @@
+# Optional local neural voice. Install PyTorch for your hardware first
+# (https://pytorch.org/get-started/locally/), then:
+omnivoice>=0.2.1
+soundfile

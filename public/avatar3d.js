@@ -1,0 +1,1966 @@
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
+import { dampMouthOpening, estimateMouthCue, getMouthShape } from './avatar-cues.js';
+import { applyHologramMaterial, removeHologramMaterial, createHologramScene } from './hologram-scene.js';
+
+export { applySpeechBoundaryCue, dampMouthOpening, estimateAudioMouthOpening, estimateMouthCue, getMouthShape } from './avatar-cues.js';
+
+const MAX_MODEL_BYTES = 20 * 1024 * 1024;
+const MOUTH_PATTERN = /(?:jaw[\s._-]*open|mouth[\s._-]*open|viseme[\s._-]*(?:aa|a|ee|ih|oh|ou))/i;
+const BLINK_PATTERN = /(?:blink|eye[\s._-]*closed|eyes[\s._-]*closed)/i;
+const SMILE_PATTERN = /(?:smile|happy|joy)/i;
+const ATTENTIVE_PATTERN = /(?:attentive|interest|listening)/i;
+const THINK_PATTERN = /(?:think|brow[\s._-]*(?:down|inner)|concern)/i;
+const FROWN_PATTERN = /(?:frown|sad|angry)/i;
+const BROW_PATTERN = /(?:brow[\s._-]*(?:up|outer)|browouterup)/i;
+const CHEEK_PATTERN = /(?:cheek[\s._-]*(?:inflate|puff|soft)|cheekpuff)/i;
+const SPEAK_PATTERN = /(?:speaking|talking|speech)/i;
+
+export const AVATAR_IDLE_LIFE_CONFIG = {
+  liveliness: 0.6,
+  masterBreathing: 0.008,
+  masterHead: 0.85,
+  masterSway: 1.0,
+  blink: { intervalMinSeconds: 2.5, intervalMaxSeconds: 6, durationCloseSeconds: 0.07, durationOpenSeconds: 0.105, doubleBlinkChance: 1 / 6 },
+  eyeSaccade: { intervalMinSeconds: 0.8, intervalMaxSeconds: 3, angleDegrees: 2.5, quickSeconds: 0.09 },
+  breathingPeriodSeconds: 4.5,
+  headPeriodsSeconds: [7, 11, 17],
+  swayPeriodSeconds: 9,
+  speechNodDegrees: 1.25,
+  speechNodDurationMinMs: 180,
+  speechNodDurationMaxMs: 260,
+  headPitchLimitDegrees: 1.5,
+  headYawLimitDegrees: 1.5,
+  headRollLimitDegrees: 1.1,
+  referencePortraitMotionScale: 0.22,
+  reducedMotionHeadScale: 0.15,
+  stateTransitionSeconds: 0.4,
+  expressionTransitionSeconds: 0.35,
+  maxFacialExpression: 0.18,
+  mouthCap: 0.78,
+  visemeEaseSeconds: 0.075,
+  mouthCheekSoftness: 0.08,
+  idleSmile: 0.065,
+  speakingBrowLift: 0.12,
+};
+
+export const AVATAR_EXPRESSION_PROFILES = Object.freeze({
+  idle: Object.freeze({ happy: 0.025, attentive: 0, thinking: 0, frown: 0, brow: 0, cheek: 0 }),
+  listening: Object.freeze({ happy: 0, attentive: 0.14, thinking: 0, frown: 0, brow: 0, cheek: 0.015 }),
+  thinking: Object.freeze({ happy: 0, attentive: 0, thinking: 0.12, frown: 0.015, brow: 0, cheek: 0 }),
+  speaking: Object.freeze({ happy: 0.015, attentive: 0.025, thinking: 0, frown: 0, brow: 0.025, cheek: 0 }),
+  offline: Object.freeze({ happy: 0, attentive: 0, thinking: 0, frown: 0.07, brow: 0, cheek: 0 }),
+  happy: Object.freeze({ happy: 0.12, attentive: 0, thinking: 0, frown: 0, brow: 0, cheek: 0 }),
+});
+
+export function getAvatarExpressionProfile(state, {
+  reducedMotion = false,
+  quality = 'high',
+  scale = 1,
+} = {}) {
+  const normalizedState = state === 'normal' || state === 'online' ? 'idle'
+    : state === 'error' ? 'offline' : state;
+  const profile = AVATAR_EXPRESSION_PROFILES[normalizedState] || AVATAR_EXPRESSION_PROFILES.idle;
+  const motionScale = reducedMotion ? 0.15 : quality === 'low' ? 0.65 : 1;
+  const safeScale = Number.isFinite(scale) ? THREE.MathUtils.clamp(scale, 0, 1) : 1;
+  return Object.fromEntries(Object.entries(profile).map(([name, value]) => [
+    name,
+    THREE.MathUtils.clamp(value * motionScale * safeScale, 0, AVATAR_IDLE_LIFE_CONFIG.maxFacialExpression),
+  ]));
+}
+
+export function applyMorphTargetInfluence(targets, value, smoothing = 0.16) {
+  const targetValue = Number.isFinite(value) ? THREE.MathUtils.clamp(value, 0, 1) : 0;
+  const blend = Number.isFinite(smoothing) ? THREE.MathUtils.clamp(smoothing, 0, 1) : 0.16;
+  for (const { object, index } of targets || []) {
+    const influences = object?.morphTargetInfluences;
+    if (!influences || !Number.isInteger(index) || index < 0 || index >= influences.length) continue;
+    const current = Number.isFinite(influences[index]) ? influences[index] : 0;
+    influences[index] = THREE.MathUtils.lerp(current, targetValue, blend);
+  }
+}
+
+export function dampAvatarExpression(value, target, deltaSeconds) {
+  const maximum = AVATAR_IDLE_LIFE_CONFIG.maxFacialExpression;
+  const currentValue = Number.isFinite(value) ? THREE.MathUtils.clamp(value, 0, maximum) : 0;
+  const targetValue = Number.isFinite(target) ? THREE.MathUtils.clamp(target, 0, maximum) : 0;
+  const delta = Number.isFinite(deltaSeconds) ? THREE.MathUtils.clamp(deltaSeconds, 0, 0.05) : 0;
+  return THREE.MathUtils.damp(
+    currentValue,
+    targetValue,
+    3 / AVATAR_IDLE_LIFE_CONFIG.expressionTransitionSeconds,
+    delta,
+  );
+}
+
+/*
+ * Tuning guide:
+ * liveliness - global strength; masterBreathing/masterHead/masterSway - feature strength.
+ * breathingPeriodSeconds/headPeriodsSeconds/swayPeriodSeconds - movement rhythm.
+ * eyeSaccade.angleDegrees - gaze shift size; blink.* - blink timing.
+ * speechNodDegrees/mouthCap/visemeEaseSeconds - speaking mouth and head response.
+ * idleSmile/speakingBrowLift/mouthCheekSoftness - facial expression strength.
+ */
+const GLOBE_RENDER_SCALE = 1.72;
+const GLOBE_CONTENT_RADIUS = 1.42;
+const GLOBE_FRAME_PADDING = 1.06;
+const EARTH_CONTINENTS = [
+  [[-168, 70], [-145, 72], [-128, 62], [-123, 51], [-132, 48], [-124, 40], [-117, 32], [-108, 24], [-97, 17], [-83, 9], [-77, 25], [-61, 45], [-67, 55], [-91, 61], [-111, 72], [-140, 73]],
+  [[-81, 12], [-70, 10], [-52, 4], [-36, -8], [-48, -22], [-54, -34], [-66, -53], [-74, -40], [-72, -15]],
+  [[-12, 36], [0, 44], [8, 55], [25, 60], [35, 70], [60, 72], [85, 75], [112, 69], [138, 58], [158, 53], [151, 43], [132, 35], [121, 24], [108, 9], [99, 5], [91, 20], [78, 8], [68, 23], [54, 27], [44, 38], [30, 36], [20, 43], [10, 36]],
+  [[-17, 36], [8, 38], [32, 31], [49, 12], [40, -8], [31, -25], [19, -35], [5, -27], [-3, -8], [-13, 12]],
+  [[112, -11], [129, -10], [145, -17], [153, -29], [144, -39], [126, -43], [115, -34], [113, -22]],
+  [[-53, 60], [-43, 61], [-38, 71], [-45, 82], [-57, 84], [-66, 77], [-62, 68]],
+  [[47, -13], [50, -16], [49, -25], [45, -24]],
+  [[-180, -68], [-150, -72], [-110, -70], [-70, -74], [-30, -69], [10, -72], [50, -68], [90, -73], [130, -69], [170, -72], [180, -68], [180, -90], [-180, -90]],
+];
+
+function isPointInPolygon(longitude, latitude, polygon) {
+  let inside = false;
+  for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index, index += 1) {
+    const [currentLongitude, currentLatitude] = polygon[index];
+    const [previousLongitude, previousLatitude] = polygon[previous];
+    const crossesLatitude = (currentLatitude > latitude) !== (previousLatitude > latitude);
+    if (crossesLatitude && longitude < (
+      ((previousLongitude - currentLongitude) * (latitude - currentLatitude))
+      / (previousLatitude - currentLatitude) + currentLongitude
+    )) inside = !inside;
+  }
+  return inside;
+}
+
+function createEarthSurfaceTexture() {
+  const width = 768;
+  const height = 384;
+  const data = new Uint8Array(width * height * 4);
+  const continents = EARTH_CONTINENTS.map((polygon) => ({
+    polygon,
+    minLongitude: Math.min(...polygon.map(([longitude]) => longitude)),
+    maxLongitude: Math.max(...polygon.map(([longitude]) => longitude)),
+    minLatitude: Math.min(...polygon.map(([, latitude]) => latitude)),
+    maxLatitude: Math.max(...polygon.map(([, latitude]) => latitude)),
+  }));
+  const land = new Uint8Array(width * height);
+
+  for (let y = 0; y < height; y += 1) {
+    const latitude = (y / (height - 1)) * 180 - 90;
+    for (let x = 0; x < width; x += 1) {
+      const longitude = (x / (width - 1)) * 360 - 180;
+      if (continents.some(({ polygon, minLongitude, maxLongitude, minLatitude, maxLatitude }) => (
+        longitude >= minLongitude && longitude <= maxLongitude
+        && latitude >= minLatitude && latitude <= maxLatitude
+        && isPointInPolygon(longitude, latitude, polygon)
+      ))) land[y * width + x] = 1;
+    }
+  }
+
+  for (let y = 0; y < height; y += 1) {
+    const latitude = (y / (height - 1)) * 180 - 90;
+    for (let x = 0; x < width; x += 1) {
+      const pixel = y * width + x;
+      const offset = pixel * 4;
+      const isLand = land[pixel] === 1;
+      const coast = isLand && (
+        !land[y * width + Math.max(0, x - 1)]
+        || !land[y * width + Math.min(width - 1, x + 1)]
+        || !land[Math.max(0, y - 1) * width + x]
+        || !land[Math.min(height - 1, y + 1) * width + x]
+      );
+      let coastalGlow = 0;
+      if (!isLand) {
+        for (let yOffset = -2; yOffset <= 2; yOffset += 1) {
+          for (let xOffset = -2; xOffset <= 2; xOffset += 1) {
+            const distance = Math.abs(xOffset) + Math.abs(yOffset);
+            if (distance > 2) continue;
+            const neighborY = y + yOffset;
+            if (neighborY < 0 || neighborY >= height) continue;
+            const neighborX = (x + xOffset + width) % width;
+            if (land[neighborY * width + neighborX]) {
+              coastalGlow = Math.max(coastalGlow, distance === 1 ? 145 : 78);
+            }
+          }
+        }
+      }
+      const longitude = (x / (width - 1)) * 360 - 180;
+      const latitudeGridDistance = Math.min(Math.abs(latitude % 10), 10 - Math.abs(latitude % 10));
+      const longitudeGridDistance = Math.min(Math.abs(longitude % 10), 10 - Math.abs(longitude % 10));
+      const grid = latitudeGridDistance < 0.42 || longitudeGridDistance < 0.42;
+      const relief = isLand && !coast
+        ? Math.round((Math.sin(longitude * 0.22 + Math.sin(latitude * 0.11) * 2) + 1) * 9)
+        : 0;
+      let red = 8;
+      let green = 38;
+      let alpha = 28;
+      if (coast) {
+        red = 145;
+        green = 242;
+        alpha = 250;
+      } else if (coastalGlow) {
+        red = 58;
+        green = 190;
+        alpha = coastalGlow;
+      } else if (isLand) {
+        red = 34 + relief;
+        green = 153 + relief;
+        alpha = 164 + relief;
+      } else if (grid) {
+        red = 30;
+        green = 121;
+        alpha = 82;
+      }
+      data[offset] = red;
+      data[offset + 1] = green;
+      data[offset + 2] = 255;
+      data[offset + 3] = alpha;
+    }
+  }
+
+  const texture = new THREE.DataTexture(data, width, height, THREE.RGBAFormat);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function spherePoint(longitude, latitude, radius) {
+  const longitudeRadians = THREE.MathUtils.degToRad(longitude);
+  const latitudeRadians = THREE.MathUtils.degToRad(latitude);
+  const latitudeRadius = Math.cos(latitudeRadians) * radius;
+  return new THREE.Vector3(
+    Math.sin(longitudeRadians) * latitudeRadius,
+    Math.sin(latitudeRadians) * radius,
+    Math.cos(longitudeRadians) * latitudeRadius,
+  );
+}
+
+function addGlobeGrid(globe, material) {
+  for (let latitude = -80; latitude <= 80; latitude += 10) {
+    const points = [];
+    for (let longitude = 0; longitude <= 360; longitude += 2) {
+      points.push(spherePoint(longitude, latitude, 1.012));
+    }
+    const line = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(points), material);
+    line.name = `earth-latitude-${latitude}`;
+    globe.add(line);
+  }
+  for (let longitude = 0; longitude < 360; longitude += 10) {
+    const points = [];
+    for (let latitude = -90; latitude <= 90; latitude += 2) {
+      points.push(spherePoint(longitude, latitude, 1.012));
+    }
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), material);
+    line.name = `earth-longitude-${longitude}`;
+    globe.add(line);
+  }
+}
+
+export function createHolographicGlobe() {
+  const root = new THREE.Group();
+  root.name = 'jarvis-holographic-earth';
+  const globe = new THREE.Group();
+  globe.name = 'earth-globe';
+  root.add(globe);
+
+  const atmosphere = new THREE.Mesh(
+    new THREE.SphereGeometry(1.075, 56, 40),
+    new THREE.MeshBasicMaterial({
+      color: 0x168dff,
+      side: THREE.BackSide,
+      transparent: true,
+      opacity: 0.22,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  );
+  atmosphere.name = 'earth-atmosphere';
+  globe.add(atmosphere);
+
+  const atmosphereHalo = new THREE.Mesh(
+    new THREE.SphereGeometry(1.13, 56, 40),
+    new THREE.MeshBasicMaterial({
+      color: 0x28aaff,
+      side: THREE.BackSide,
+      transparent: true,
+      opacity: 0.12,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  );
+  atmosphereHalo.name = 'earth-atmosphere-halo';
+  globe.add(atmosphereHalo);
+
+  const ocean = new THREE.Mesh(
+    new THREE.SphereGeometry(1, 64, 48),
+    new THREE.MeshBasicMaterial({
+      color: 0x063d86,
+      transparent: true,
+      opacity: 0.19,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  );
+  ocean.name = 'earth-ocean';
+  globe.add(ocean);
+
+  const land = new THREE.Mesh(
+    new THREE.SphereGeometry(1.006, 64, 48),
+    new THREE.MeshBasicMaterial({
+      map: createEarthSurfaceTexture(),
+      transparent: true,
+      opacity: 0.9,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  );
+  land.name = 'earth-continents';
+  globe.add(land);
+
+  const gridMaterial = new THREE.LineBasicMaterial({
+    color: 0x66e8ff,
+    transparent: true,
+    opacity: 0.38,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  addGlobeGrid(globe, gridMaterial);
+
+  const orbitRig = new THREE.Group();
+  orbitRig.name = 'earth-orbit-rings';
+  root.add(orbitRig);
+  const orbitMaterials = [
+    new THREE.MeshBasicMaterial({
+      color: 0x9deeff,
+      transparent: true,
+      opacity: 0.78,
+      blending: THREE.AdditiveBlending,
+    }),
+    new THREE.MeshBasicMaterial({
+      color: 0x238cff,
+      transparent: true,
+      opacity: 0.58,
+      blending: THREE.AdditiveBlending,
+    }),
+  ];
+  const orbitRings = [1.22, 1.34].map((radius, index) => {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, index ? 0.004 : 0.007, 6, 112), orbitMaterials[index]);
+    ring.name = `earth-orbit-${index + 1}`;
+    ring.rotation.set(index ? 0.92 : 1.12, index * 0.45, index ? 0.45 : -0.25);
+    orbitRig.add(ring);
+    return ring;
+  });
+
+  const particlePositions = new Float32Array(84 * 3);
+  for (let index = 0; index < 84; index += 1) {
+    const y = 1 - ((index + 0.5) / 84) * 2;
+    const angle = index * 2.399963229728653;
+    const radius = 1.13 + ((index * 17) % 29) / 100;
+    const horizontalRadius = Math.sqrt(1 - y * y) * radius;
+    particlePositions[index * 3] = Math.cos(angle) * horizontalRadius;
+    particlePositions[index * 3 + 1] = y * radius;
+    particlePositions[index * 3 + 2] = Math.sin(angle) * horizontalRadius;
+  }
+  const particleGeometry = new THREE.BufferGeometry();
+  particleGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+  const particles = new THREE.Points(
+    particleGeometry,
+    new THREE.PointsMaterial({
+      color: 0x77ddff,
+      size: 0.018,
+      transparent: true,
+      opacity: 0.68,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      sizeAttenuation: true,
+    }),
+  );
+  particles.name = 'earth-particles';
+  root.add(particles);
+
+  const scanPositions = new Float32Array(97 * 3);
+  const scanGeometry = new THREE.BufferGeometry();
+  scanGeometry.setAttribute('position', new THREE.BufferAttribute(scanPositions, 3));
+  const scanline = new THREE.LineLoop(
+    scanGeometry,
+    new THREE.LineBasicMaterial({
+      color: 0xaff7ff,
+      transparent: true,
+      opacity: 0.64,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  );
+  scanline.name = 'earth-scanline';
+  globe.add(scanline);
+  const initialScanPositions = scanline.geometry.attributes.position;
+  for (let index = 0; index < initialScanPositions.count; index += 1) {
+    const longitude = (index / (initialScanPositions.count - 1)) * 360;
+    const point = spherePoint(longitude, 0, 1.018);
+    initialScanPositions.setXYZ(index, point.x, point.y, point.z);
+  }
+  initialScanPositions.needsUpdate = true;
+
+  return { root, globe, atmosphere, atmosphereHalo, orbitRig, orbitRings, particles, scanline };
+}
+
+export function animateHolographicGlobe(rig, seconds, { reducedMotion = false } = {}) {
+  if (!rig || reducedMotion) return;
+  rig.globe.rotation.y = seconds * 0.12;
+  rig.atmosphere.material.opacity = 0.2 + Math.sin(seconds * 0.52) * 0.035;
+  rig.atmosphereHalo.material.opacity = 0.12 + Math.sin(seconds * 0.52 + 0.8) * 0.025;
+  rig.orbitRig.rotation.y = seconds * 0.045;
+  rig.particles.rotation.y = -seconds * 0.035;
+  const latitude = Math.sin(seconds * 0.24) * 68;
+  const positions = rig.scanline.geometry.attributes.position;
+  const latitudeRadians = THREE.MathUtils.degToRad(latitude);
+  const latitudeRadius = Math.cos(latitudeRadians) * 1.018;
+  const vertical = Math.sin(latitudeRadians) * 1.018;
+  for (let index = 0; index < positions.count; index += 1) {
+    const longitudeRadians = THREE.MathUtils.degToRad((index / (positions.count - 1)) * 360);
+    positions.setXYZ(
+      index,
+      Math.sin(longitudeRadians) * latitudeRadius,
+      vertical,
+      Math.cos(longitudeRadians) * latitudeRadius,
+    );
+  }
+  positions.needsUpdate = true;
+  rig.scanline.material.opacity = 0.42 + Math.sin(seconds * 0.9) * 0.16;
+}
+
+function frameHolographicGlobe(camera) {
+  const verticalFov = THREE.MathUtils.degToRad(camera.fov);
+  const halfVisibleAngle = Math.atan(
+    Math.tan(verticalFov / 2) * Math.min(camera.aspect, 1),
+  );
+  const scaledRadius = GLOBE_CONTENT_RADIUS * GLOBE_RENDER_SCALE * GLOBE_FRAME_PADDING;
+  const distance = scaledRadius / Math.sin(halfVisibleAngle);
+  camera.position.set(0, 0, distance);
+  camera.lookAt(0, 0, 0);
+  camera.updateProjectionMatrix();
+}
+
+export function getAvatarRenderQuality({
+  navigator = globalThis.navigator,
+  viewportWidth = globalThis.window?.innerWidth ?? Infinity,
+  devicePixelRatio = globalThis.window?.devicePixelRatio ?? 1,
+  hasCoarsePointer = globalThis.window?.matchMedia?.('(pointer: coarse)').matches ?? false,
+} = {}) {
+  const isMobile = Boolean(navigator?.userAgentData?.mobile) || hasCoarsePointer || viewportWidth <= 780;
+  const isLowPower = (navigator?.hardwareConcurrency > 0 && navigator.hardwareConcurrency <= 4)
+    || (navigator?.deviceMemory > 0 && navigator.deviceMemory <= 4)
+    || Boolean(navigator?.connection?.saveData);
+  const reducedQuality = isMobile || isLowPower;
+  return {
+    isMobile,
+    isLowPower,
+    antialias: !reducedQuality,
+    pixelRatio: Math.min(devicePixelRatio || 1, reducedQuality ? 1 : 1.35),
+  };
+}
+
+function collectMorphTargets(root) {
+  const targets = [];
+  root.traverse((object) => {
+    if (!object.isMesh || !object.morphTargetDictionary || !object.morphTargetInfluences) return;
+    for (const [name, index] of Object.entries(object.morphTargetDictionary)) {
+      targets.push({ object, index, name });
+    }
+  });
+  return targets;
+}
+
+function findMorphs(targets, pattern) {
+  return targets.filter(({ name }) => pattern.test(name));
+}
+
+function disposeScene(root) {
+  const geometries = new Set();
+  const uniqueMaterials = new Set();
+  const textures = new Set();
+  root.traverse((object) => {
+    if (object.geometry) geometries.add(object.geometry);
+    const objectMaterials = Array.isArray(object.material) ? object.material : [object.material];
+    for (const material of objectMaterials) {
+      if (!material) continue;
+      uniqueMaterials.add(material);
+      for (const value of Object.values(material)) {
+        if (value?.isTexture) textures.add(value);
+      }
+    }
+  });
+  geometries.forEach((geometry) => geometry.dispose());
+  textures.forEach((texture) => texture.dispose());
+  uniqueMaterials.forEach((material) => material.dispose());
+}
+
+function disposeParsedAvatar(gltf) {
+  const vrm = gltf?.userData?.vrm;
+  if (vrm) VRMUtils.deepDispose(vrm.scene);
+  else if (gltf?.scene) disposeScene(gltf.scene);
+}
+
+export function inspectAvatarRig(root) {
+  const morphTargets = collectMorphTargets(root);
+  return {
+    morphTargets,
+    mouthTargets: findMorphs(morphTargets, MOUTH_PATTERN),
+    blinkTargets: findMorphs(morphTargets, BLINK_PATTERN),
+    smileTargets: findMorphs(morphTargets, SMILE_PATTERN),
+    attentiveTargets: findMorphs(morphTargets, ATTENTIVE_PATTERN),
+    thinkTargets: findMorphs(morphTargets, THINK_PATTERN),
+    frownTargets: findMorphs(morphTargets, FROWN_PATTERN),
+    browTargets: findMorphs(morphTargets, BROW_PATTERN),
+    cheekTargets: findMorphs(morphTargets, CHEEK_PATTERN),
+    speakingTargets: findMorphs(morphTargets, SPEAK_PATTERN),
+  };
+}
+
+export function validateAvatarFile(file) {
+  if (!file || !/\.(?:glb|vrm)$/i.test(file.name)) {
+    throw new Error('Choose a self-contained .glb or .vrm file. External .gltf assets are not loaded.');
+  }
+  if (file.size > MAX_MODEL_BYTES) {
+    throw new Error('The avatar file must be 20 MB or smaller.');
+  }
+}
+
+export async function readAvatarFile(file, onProgress = () => {}) {
+  if (typeof file.stream !== 'function') return file.arrayBuffer();
+  const reader = file.stream().getReader();
+  const chunks = [];
+  let loaded = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      loaded += value.byteLength;
+      onProgress(loaded, file.size);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(loaded);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes.buffer;
+}
+
+export function validateSelfContainedGlb(buffer) {
+  const view = new DataView(buffer);
+  if (view.byteLength < 20 || view.getUint32(0, true) !== 0x46546c67 || view.getUint32(4, true) !== 2) {
+    throw new Error('The file is not a valid GLB 2.0 model.');
+  }
+  if (view.getUint32(8, true) !== view.byteLength) {
+    throw new Error('The GLB file length is invalid.');
+  }
+  const jsonLength = view.getUint32(12, true);
+  if (view.getUint32(16, true) !== 0x4e4f534a || jsonLength + 20 > view.byteLength) {
+    throw new Error('The GLB does not contain a valid JSON chunk.');
+  }
+  let document;
+  try {
+    document = JSON.parse(new TextDecoder().decode(new Uint8Array(buffer, 20, jsonLength)));
+  } catch {
+    throw new Error('The GLB JSON chunk is invalid.');
+  }
+  if (!document || typeof document !== 'object' || Array.isArray(document)) {
+    throw new Error('The GLB does not contain a valid model document.');
+  }
+  const resources = [...(document.buffers || []), ...(document.images || [])];
+  if (resources.some((resource) => typeof resource.uri === 'string' && !resource.uri.startsWith('data:'))) {
+    throw new Error('The GLB references external files; embed all buffers and textures in the model.');
+  }
+  return document;
+}
+
+export function parseAvatarGlb(buffer, loader) {
+  validateSelfContainedGlb(buffer);
+  const gltfLoader = loader || new GLTFLoader();
+  gltfLoader.register((parser) => new VRMLoaderPlugin(parser));
+  return new Promise((resolve, reject) => gltfLoader.parse(buffer, '', resolve, reject));
+}
+
+export function applyVrmExpressions(expressions, {
+  mouthViseme = 'aa',
+  mouthValue = 0,
+  blinkValue = 0,
+  happy = 0,
+  attentive = 0,
+  thinking = 0,
+  frown = 0,
+  brow = 0,
+  cheek = 0,
+  speaking = 0,
+} = {}) {
+  if (!expressions?.getExpression || !expressions?.setValue) return;
+  const expressionLimit = AVATAR_IDLE_LIFE_CONFIG.maxFacialExpression;
+  const clampExpression = (value, maximum = expressionLimit) => THREE.MathUtils.clamp(
+    Number.isFinite(value) ? value : 0,
+    0,
+    maximum,
+  );
+  const setIfAvailable = (name, value) => {
+    if (expressions.getExpression(name)) expressions.setValue(name, value);
+  };
+  for (const viseme of ['aa', 'ee', 'ih', 'oh', 'ou']) {
+    setIfAvailable(viseme, viseme === mouthViseme ? clampExpression(mouthValue, AVATAR_IDLE_LIFE_CONFIG.mouthCap) : 0);
+  }
+  setIfAvailable('blink', clampExpression(blinkValue, 1));
+  setIfAvailable('happy', clampExpression(happy));
+  setIfAvailable('sad', clampExpression(frown));
+  setIfAvailable('relaxed', clampExpression(Math.max(attentive, thinking)));
+  setIfAvailable('cheekPuff', clampExpression(cheek));
+  setIfAvailable('speaking', clampExpression(speaking));
+  for (const expression of ['browInnerUp', 'browOuterUp']) {
+    setIfAvailable(expression, clampExpression(brow));
+  }
+  for (const expression of ['listening', 'attentive', 'thinking', 'frown']) {
+    setIfAvailable(expression, clampExpression({
+      listening: attentive,
+      attentive,
+      thinking,
+      frown,
+    }[expression]));
+  }
+}
+
+export function frameAvatarPortrait(camera, root, focusNode, { balancedPortrait = false } = {}) {
+  root.updateWorldMatrix(true, true);
+  const bounds = new THREE.Box3().setFromObject(root);
+  const size = bounds.getSize(new THREE.Vector3());
+  const focus = focusNode
+    ? focusNode.getWorldPosition(new THREE.Vector3())
+    : bounds.getCenter(new THREE.Vector3());
+  const distanceMultiplier = balancedPortrait ? 1.55 : 1.35;
+  const distance = Math.max(2.1, size.x * 2, size.y * distanceMultiplier);
+
+  camera.position.set(focus.x, focus.y, focus.z + distance);
+  camera.lookAt(
+    focus.x,
+    balancedPortrait ? focus.y : focus.y - Math.min(size.y * 0.1, 0.18),
+    focus.z,
+  );
+  camera.updateProjectionMatrix();
+}
+
+export function applyHeadMotion(head, baseRotation, seconds, tilt, {
+  yaw = 0,
+  roll = 0,
+  nod = 0,
+  motionScale = 1,
+  pitchLimitDegrees = AVATAR_IDLE_LIFE_CONFIG.headPitchLimitDegrees,
+  yawLimitDegrees = AVATAR_IDLE_LIFE_CONFIG.headYawLimitDegrees,
+  rollLimitDegrees = AVATAR_IDLE_LIFE_CONFIG.headRollLimitDegrees,
+} = {}) {
+  const scale = THREE.MathUtils.clamp(motionScale, 0, 1);
+  const clampOffset = (value, limitDegrees) => THREE.MathUtils.clamp(
+    value * scale,
+    -THREE.MathUtils.degToRad(limitDegrees) * scale,
+    THREE.MathUtils.degToRad(limitDegrees) * scale,
+  );
+  head.rotation.x = baseRotation.x + clampOffset(tilt + Math.sin(seconds * 0.8) * 0.006 + nod, pitchLimitDegrees);
+  head.rotation.y = baseRotation.y + clampOffset(Math.sin(seconds * 0.55) * 0.012 + yaw, yawLimitDegrees);
+  head.rotation.z = baseRotation.z + clampOffset(Math.sin(seconds * 0.35) * 0.004 + roll, rollLimitDegrees);
+}
+
+export function clampAvatarParallax(x, y) {
+  return {
+    x: THREE.MathUtils.clamp(Number.isFinite(x) ? x : 0, -0.06, 0.06),
+    y: THREE.MathUtils.clamp(Number.isFinite(y) ? y : 0, -0.04, 0.04),
+  };
+}
+
+export function getSpeechNodPulse(elapsedMs, durationMs, energy) {
+  if (!Number.isFinite(elapsedMs) || !Number.isFinite(durationMs) || durationMs <= 0
+    || elapsedMs < 0 || elapsedMs >= durationMs) return 0;
+  return -Math.sin((elapsedMs / durationMs) * Math.PI)
+    * THREE.MathUtils.degToRad(AVATAR_IDLE_LIFE_CONFIG.speechNodDegrees)
+    * THREE.MathUtils.clamp(Number.isFinite(energy) ? energy : 0, 0, 1);
+}
+
+function addSphere(parent, name, material, position, scale) {
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), material);
+  mesh.name = name;
+  mesh.position.set(...position);
+  mesh.scale.set(...scale);
+  parent.add(mesh);
+  return mesh;
+}
+
+function addCurve(parent, name, material, points, radius = 0.012) {
+  const curve = new THREE.CatmullRomCurve3(points.map((point) => new THREE.Vector3(...point)));
+  const mesh = new THREE.Mesh(new THREE.TubeGeometry(curve, 12, radius, 5, false), material);
+  mesh.name = name;
+  parent.add(mesh);
+  return mesh;
+}
+
+function createSkinTexture() {
+  const size = 128;
+  const data = new Uint8Array(size * size * 4);
+  const gaussian = (u, v, centerX, centerY, radiusX, radiusY) => Math.exp(
+    -(((u - centerX) / radiusX) ** 2 + ((v - centerY) / radiusY) ** 2) * 0.5,
+  );
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const offset = (y * size + x) * 4;
+      const sample = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+      const grain = (sample - Math.floor(sample) - 0.5) * 4;
+      const u = x / (size - 1);
+      const v = y / (size - 1);
+      const cheeks = gaussian(u, v, 0.34, 0.58, 0.09, 0.08) + gaussian(u, v, 0.66, 0.58, 0.09, 0.08);
+      const bridge = gaussian(u, v, 0.5, 0.54, 0.035, 0.2);
+      const jawShade = Math.max(0, v - 0.72) * 22;
+      data[offset] = 233 + grain + cheeks * 5 + bridge * 2 - jawShade;
+      data[offset + 1] = 194 + grain + cheeks * 0.5 - jawShade * 0.78;
+      data[offset + 2] = 173 + grain + cheeks * 0.2 - jawShade * 0.64;
+      data[offset + 3] = 255;
+    }
+  }
+  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+export function createReferencePortraitTexture(image) {
+  const width = 1024;
+  const sourceWidth = image.naturalWidth || image.width || width;
+  const sourceHeight = image.naturalHeight || image.height || width;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = Math.round(width * sourceHeight / sourceWidth);
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Could not create the reference portrait canvas.');
+  context.drawImage(image, 0, 0, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearFilter;
+  texture.anisotropy = 4;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+export function createReferenceFaceTexture(image) {
+  const width = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = width;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Could not create the reference face texture canvas.');
+
+  const sourceWidth = image.naturalWidth || image.width;
+  const sourceHeight = image.naturalHeight || image.height;
+  context.drawImage(image, sourceWidth * 0.32, 0, sourceWidth * 0.36, sourceHeight * 0.6, 0, 0, width / 2, width);
+  context.save();
+  context.translate(width, 0);
+  context.scale(-1, 1);
+  context.drawImage(image, sourceWidth * 0.32, 0, sourceWidth * 0.36, sourceHeight * 0.6, 0, 0, width / 2, width);
+  context.restore();
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+  return texture;
+}
+
+export function animateBuiltInAvatar(rig, {
+  blinkValue = 0,
+  mouthValue = 0,
+  mouthViseme = 'aa',
+  happy = 0,
+  attentive = 0,
+  thinking = 0,
+  frown = 0,
+} = {}) {
+  if (!rig) return;
+  const deltaTime = rig.lastAnimationSeconds === undefined
+    ? 1 / 60
+    : THREE.MathUtils.clamp(rig.seconds - rig.lastAnimationSeconds, 0, 0.05);
+  rig.lastAnimationSeconds = rig.seconds;
+  const blink = THREE.MathUtils.clamp(blinkValue, 0, 1);
+  for (const lid of rig.lids) {
+    lid.scale.y = 0.012 + blink * 0.09 + attentive * 0.004 + thinking * 0.003 + frown * 0.004;
+    lid.position.y = lid.userData.openY - blink * 0.055 + attentive * 0.003 - thinking * 0.003 - frown * 0.004;
+  }
+  rig.gazeX = THREE.MathUtils.damp(rig.gazeX || 0, -thinking * 0.018, 8, deltaTime);
+  rig.gazeY = THREE.MathUtils.damp(rig.gazeY || 0, thinking * 0.018 + attentive * 0.004 - frown * 0.008, 8, deltaTime);
+  for (const pupil of rig.pupils) {
+    pupil.position.x = pupil.userData.baseX + Math.sin(rig.seconds * 0.31) * 0.012 + rig.gazeX;
+    pupil.position.y = pupil.userData.baseY + Math.sin(rig.seconds * 0.23) * 0.008
+      + rig.gazeY;
+  }
+  const targetVisemeScale = mouthViseme === 'oh' || mouthViseme === 'ou' ? 0.78 : mouthViseme === 'ee' ? 0.72 : 1;
+  if (rig.mouth) {
+    rig.visemeScale = THREE.MathUtils.damp(rig.visemeScale ?? 1, targetVisemeScale, 14, deltaTime);
+    rig.mouth.scale.y = 0.001 + Math.max(mouthValue, happy * 0.3) * 0.042;
+    rig.mouth.scale.x = 0.068 * (rig.visemeScale + happy * 0.2 - frown * 0.16);
+    rig.mouth.position.y = -0.32 + happy * 0.012 - frown * 0.012;
+    rig.mouth.rotation.z = -frown * 0.16;
+  }
+  if (rig.lowerLip) {
+    rig.lowerLip.position.y = rig.lowerLip.userData.openY - mouthValue * 0.012;
+    rig.lowerLip.scale.x = 1 + happy * 0.12;
+  }
+  rig.brows.forEach((brow, index) => {
+    const side = brow.userData.side || (index === 0 ? -1 : 1);
+    brow.position.y = brow.userData.openY + happy * 0.014 + attentive * 0.017 - thinking * 0.012 - frown * 0.016;
+    brow.rotation.z = side * happy * 0.24 + attentive * 0.08
+      + (index === 0 ? -thinking * 0.2 : thinking * 0.08) - side * frown * 0.2;
+  });
+  rig.head.rotation.z = Math.sin(rig.seconds * 0.35) * 0.008
+    + attentive * 0.025 - thinking * 0.018 + happy * 0.035 - frown * 0.055;
+}
+
+export function createBuiltInAvatar(referenceImage) {
+  if (referenceImage) {
+    const root = new THREE.Group();
+    root.name = 'jarvis-master-reference-avatar';
+    const sourceWidth = referenceImage.naturalWidth || referenceImage.width || 1536;
+    const sourceHeight = referenceImage.naturalHeight || referenceImage.height || 1536;
+    const portraitWidth = 1.08;
+    const portraitHeight = portraitWidth * sourceHeight / sourceWidth;
+    const head = new THREE.Group();
+    head.name = 'reference-head';
+    root.add(head);
+    const portrait = new THREE.Mesh(
+      new THREE.PlaneGeometry(portraitWidth, portraitHeight),
+      new THREE.MeshBasicMaterial({
+        map: createReferencePortraitTexture(referenceImage),
+        transparent: true,
+        alphaTest: 0.01,
+        toneMapped: false,
+      }),
+    );
+    portrait.name = 'reference-portrait-plane';
+    portrait.position.set(0, 0, 0.16);
+    portrait.renderOrder = 10;
+    head.add(portrait);
+    return {
+      root,
+      rig: {
+        head,
+        lids: [],
+        pupils: [],
+        brows: [],
+        mouth: null,
+        lowerLip: null,
+        referencePortrait: portrait,
+        seconds: 0,
+      },
+    };
+  }
+
+  const root = new THREE.Group();
+  root.name = 'jarvis-holographic-avatar';
+  const skin = new THREE.MeshStandardMaterial({
+    color: 0x78cfff,
+    emissive: 0x1268a8,
+    emissiveIntensity: 0.34,
+    metalness: 0.28,
+    roughness: 0.36,
+    transparent: true,
+    opacity: 0.82,
+  });
+  const hair = new THREE.MeshStandardMaterial({
+    color: 0x092b65,
+    emissive: 0x0879d8,
+    emissiveIntensity: 0.52,
+    metalness: 0.55,
+    roughness: 0.29,
+    transparent: true,
+    opacity: 0.88,
+  });
+  const edge = new THREE.MeshStandardMaterial({
+    color: 0x9ceeff,
+    emissive: 0x46caff,
+    emissiveIntensity: 1.15,
+    metalness: 0.3,
+    roughness: 0.24,
+  });
+  const faceSkin = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    map: referenceImage ? createReferenceFaceTexture(referenceImage) : createSkinTexture(),
+    emissive: 0x25110e,
+    emissiveIntensity: 0.025,
+    roughness: 0.68,
+    metalness: 0,
+  });
+  const faceHair = new THREE.MeshStandardMaterial({
+    color: 0x2b1b14,
+    emissive: 0x07121c,
+    emissiveIntensity: 0.06,
+    roughness: 0.76,
+    metalness: 0.02,
+  });
+  const mouthInterior = new THREE.MeshStandardMaterial({
+    color: 0x421d23,
+    roughness: 0.74,
+  });
+  const irisMaterial = new THREE.MeshStandardMaterial({
+    color: 0x4f6650,
+    roughness: 0.3,
+    metalness: 0,
+  });
+  const pupilMaterial = new THREE.MeshStandardMaterial({
+    color: 0x170f0c,
+    roughness: 0.18,
+  });
+  const eyeHighlight = new THREE.MeshBasicMaterial({ color: 0xfff8ec });
+  const eyelidMaterial = new THREE.MeshStandardMaterial({
+    color: 0xd8ad98,
+    roughness: 0.78,
+    metalness: 0,
+  });
+  const browMaterial = new THREE.MeshStandardMaterial({
+    color: 0x302019,
+    roughness: 0.82,
+  });
+  const secondaryGlint = new THREE.MeshBasicMaterial({ color: 0x9ceeff, transparent: true, opacity: 0.78 });
+  const scleraMaterial = new THREE.MeshStandardMaterial({
+    color: 0xd9e8ed,
+    roughness: 0.28,
+    metalness: 0.02,
+  });
+  const eyeRimMaterial = new THREE.MeshStandardMaterial({
+    color: 0x956e70,
+    roughness: 0.72,
+  });
+  const lipMaterial = new THREE.MeshStandardMaterial({
+    color: 0x9b5960,
+    roughness: 0.52,
+  });
+
+  addSphere(root, 'shoulders', hair, [0, -0.48, 0], [0.58, 0.3, 0.28]);
+  addSphere(root, 'upper-chest', skin, [0, -0.69, 0.015], [0.4, 0.3, 0.24]);
+  addSphere(root, 'neck', skin, [0, -0.12, 0], [0.17, 0.31, 0.17]);
+  addSphere(root, 'collar', edge, [0, -0.4, 0.22], [0.35, 0.045, 0.035]);
+  const head = new THREE.Group();
+  head.name = 'head';
+  head.position.y = 0.45;
+  root.add(head);
+  let referencePortrait = null;
+  const faceGeometry = new THREE.SphereGeometry(1, 40, 28);
+  const facePositions = faceGeometry.attributes.position;
+  for (let index = 0; index < facePositions.count; index += 1) {
+    const y = facePositions.getY(index);
+    const cheekFullness = Math.exp(-(((y + 0.12) / 0.28) ** 2)) * 0.035;
+    const jawTaper = Math.max(0, -y - 0.02) * 0.28;
+    const foreheadTaper = Math.max(0, y) * 0.045;
+    const width = 1 - jawTaper - foreheadTaper + cheekFullness;
+    const depth = 1 + Math.exp(-(((y + 0.2) / 0.34) ** 2)) * 0.035;
+    facePositions.setX(index, facePositions.getX(index) * width);
+    facePositions.setZ(index, facePositions.getZ(index) * depth);
+  }
+  facePositions.needsUpdate = true;
+  faceGeometry.computeVertexNormals();
+  const face = new THREE.Mesh(faceGeometry, faceSkin);
+  face.name = 'face';
+  face.scale.set(0.37, 0.51, 0.31);
+  head.add(face);
+  if (referenceImage) {
+    const sourceWidth = referenceImage.naturalWidth || referenceImage.width || 1536;
+    const sourceHeight = referenceImage.naturalHeight || referenceImage.height || 1536;
+    const portraitWidth = 0.78;
+    const portraitHeight = portraitWidth * sourceHeight / sourceWidth;
+    const portrait = new THREE.Mesh(
+      new THREE.PlaneGeometry(portraitWidth, portraitHeight),
+      new THREE.MeshStandardMaterial({
+        map: createReferencePortraitTexture(referenceImage),
+        transparent: true,
+        alphaTest: 0.02,
+        roughness: 0.72,
+        metalness: 0,
+        emissive: 0x07101c,
+        emissiveIntensity: 0.08,
+      }),
+    );
+    portrait.name = 'reference-portrait-plane';
+    portrait.position.set(0, 0.02, 0.38);
+    portrait.renderOrder = 5;
+    portrait.material.depthTest = true;
+    portrait.material.depthWrite = true;
+    head.add(portrait);
+    referencePortrait = portrait;
+  }
+  addSphere(head, 'nose-bridge', faceSkin, [0, 0.005, 0.315], [0.031, 0.125, 0.043]);
+  addSphere(head, 'nose-tip', faceSkin, [0, -0.105, 0.345], [0.047, 0.036, 0.034]);
+  for (const side of [-1, 1]) {
+    addSphere(head, `nose-wing-${side}`, faceSkin, [side * 0.037, -0.119, 0.329], [0.023, 0.019, 0.022]);
+  }
+  const noseHighlight = new THREE.MeshBasicMaterial({ color: 0xffe6d9, transparent: true, opacity: 0.26 });
+  addSphere(head, 'nose-highlight', noseHighlight, [-0.009, -0.04, 0.354], [0.009, 0.055, 0.004]);
+  addSphere(head, 'hair-cap', faceHair, [0, 0.22, -0.2], [0.42, 0.39, 0.25]);
+  addSphere(head, 'left-side-hair', faceHair, [-0.36, -0.11, -0.005], [0.11, 0.46, 0.26]);
+  addSphere(head, 'right-side-hair', faceHair, [0.36, -0.11, -0.005], [0.11, 0.46, 0.26]);
+
+  for (const side of [-1, 1]) {
+    addCurve(head, `hair-lock-${side}`, faceHair, [
+      [side * 0.31, 0.2, 0.04],
+      [side * 0.43, -0.05, 0.03],
+      [side * 0.39, -0.42, 0.04],
+      [side * 0.3, -0.76, 0.06],
+    ], 0.035);
+  }
+
+  const lids = [];
+  const pupils = [];
+  const brows = [];
+  for (const side of [-1, 1]) {
+    const eyeX = side * 0.19;
+    const brow = new THREE.Group();
+    brow.name = `brow-${side}`;
+    brow.position.set(eyeX, 0.215, 0.252);
+    brow.userData.openY = brow.position.y;
+    brow.userData.side = side;
+    addCurve(brow, `brow-line-${side}`, browMaterial, [
+      [-0.078, -0.003, 0],
+      [-0.035, 0.014, 0.004],
+      [0.025, 0.017, 0.004],
+      [0.078, -0.002, 0],
+    ], 0.009);
+    head.add(brow);
+    brows.push(brow);
+    const eye = new THREE.Group();
+    eye.name = `eye-${side}`;
+    eye.position.set(eyeX, 0.065, 0.272);
+    const sclera = addSphere(eye, `sclera-${side}`, scleraMaterial, [0, 0, 0], [0.061, 0.032, 0.012]);
+    sclera.name = `sclera-${side}`;
+    addCurve(eye, `upper-eye-rim-${side}`, eyeRimMaterial, [
+      [-0.063, 0, 0.005],
+      [-0.035, 0.027, 0.009],
+      [0.018, 0.03, 0.009],
+      [0.063, 0.004, 0.005],
+    ], 0.0045);
+    addCurve(eye, `lower-eye-rim-${side}`, eyeRimMaterial, [
+      [-0.06, -0.004, 0.004],
+      [-0.025, -0.027, 0.008],
+      [0.025, -0.027, 0.008],
+      [0.06, -0.004, 0.004],
+    ], 0.0035);
+    head.add(eye);
+    const lid = addSphere(head, `eyelid-${side}`, eyelidMaterial, [eyeX, 0.14, 0.319], [0.096, 0.012, 0.026]);
+    lid.userData.openY = lid.position.y;
+    lids.push(lid);
+    const iris = new THREE.Group();
+    iris.name = `iris-${side}`;
+    iris.position.set(eyeX, 0.065, 0.29);
+    iris.userData.baseX = eyeX;
+    iris.userData.baseY = iris.position.y;
+    head.add(iris);
+    addSphere(iris, `iris-color-${side}`, irisMaterial, [0, 0, 0], [0.03, 0.032, 0.009]);
+    addSphere(iris, `pupil-${side}`, pupilMaterial, [0, 0, 0.008], [0.014, 0.019, 0.005]);
+    addSphere(iris, `eye-glint-${side}`, eyeHighlight, [-0.007, 0.01, 0.013], [0.005, 0.006, 0.002]);
+    addSphere(iris, `eye-reflection-${side}`, secondaryGlint, [0.011, -0.009, 0.013], [0.0035, 0.004, 0.0015]);
+    pupils.push(iris);
+  }
+
+  const mouth = addSphere(head, 'mouth', mouthInterior, [0, -0.32, 0.265], [0.068, 0.001, 0.012]);
+  const lips = new THREE.Group();
+  lips.name = 'lips';
+  lips.position.set(0, -0.32, 0.279);
+  const upperLip = addCurve(lips, 'upper-lip', lipMaterial, [
+    [-0.064, 0, 0],
+    [-0.039, 0.008, 0.001],
+    [-0.016, 0.006, 0.002],
+    [0, 0.003, 0.002],
+    [0.016, 0.006, 0.002],
+    [0.039, 0.008, 0.001],
+    [0.064, 0, 0],
+  ], 0.006);
+  const lowerLip = addCurve(lips, 'lower-lip', lipMaterial, [
+    [-0.059, -0.002, 0],
+    [-0.034, -0.011, 0.002],
+    [0, -0.015, 0.003],
+    [0.034, -0.011, 0.002],
+    [0.059, -0.002, 0],
+  ], 0.006);
+  lowerLip.userData.openY = 0;
+  head.add(lips);
+  addSphere(head, 'ear-left', faceSkin, [-0.37, -0.02, 0], [0.055, 0.105, 0.07]);
+  addSphere(head, 'ear-right', faceSkin, [0.37, -0.02, 0], [0.055, 0.105, 0.07]);
+  if (referencePortrait) {
+    for (const child of head.children) {
+      if (child !== referencePortrait) child.visible = false;
+    }
+  }
+  return {
+    root,
+    rig: {
+      head,
+      lids,
+      pupils,
+      brows,
+      mouth,
+      lowerLip,
+      referencePortrait,
+      seconds: 0,
+    },
+  };
+}
+
+export function initializeAvatar3d({
+  frame,
+  canvas,
+  stage = canvas?.parentElement || frame,
+  image,
+  referenceImage,
+  mouthOverlay,
+  fileInput,
+  modelButton,
+  status,
+  parseModel = parseAvatarGlb,
+  createRenderer = (options) => new THREE.WebGLRenderer(options),
+}) {
+  let renderer = null;
+  let scene = null;
+  let camera = null;
+  let modelRoot = null;
+  let hologramRig = null;
+  let hologramMode = true;
+  let hologramQuality = 'auto';
+  let globeRig = null;
+  let animationFrame = 0;
+  let animationScheduled = false;
+  let resizeObserver = null;
+  let intersectionObserver = null;
+  let unloaded = false;
+  let frameVisible = true;
+  let pageVisible = typeof document === 'undefined' || document.visibilityState !== 'hidden';
+  let avatarState = 'normal';
+  let mouthValue = 0;
+  let targetMouthValue = 0;
+  let blinkStartedAt = 0;
+  let activeTargets = [];
+  let headNode = null;
+  let headBaseRotation = new THREE.Euler();
+  let modelBasePosition = new THREE.Vector3();
+  let gazeTarget = null;
+  let previousLookAtTarget;
+  let eyeNodes = [];
+  let eyeBaseRotations = [];
+  let mouthTargets = [];
+  let blinkTargets = [];
+  let smileTargets = [];
+  let attentiveTargets = [];
+  let thinkTargets = [];
+  let frownTargets = [];
+  let browTargets = [];
+  let cheekTargets = [];
+  let speakingTargets = [];
+  let builtInRig = null;
+  const expressionValues = { happy: 0, attentive: 0, thinking: 0, frown: 0, speaking: 0, brow: 0, cheek: 0 };
+  let activeVrm = null;
+  let mouthViseme = 'aa';
+  let lastFrameTime = 0;
+  let fpsWindowStartedAt = 0;
+  let fpsWindowFrames = 0;
+  let parallaxX = 0;
+  let parallaxY = 0;
+  let speechEnergy = 0;
+  let speechNodStartedAt = -Infinity;
+  let speechNodDuration = AVATAR_IDLE_LIFE_CONFIG.speechNodDurationMinMs;
+  let browValue = 0;
+  let idleLifeTime = 0;
+  let stateMix = { idle: 1, listening: 0, thinking: 0, speaking: 0, offline: 0 };
+  let targetStateMix = { idle: 1, listening: 0, thinking: 0, speaking: 0, offline: 0 };
+  let nextBlinkAt = 2.8;
+  let blinkPhase = 1;
+  let doubleBlinkPending = false;
+  let nextSaccadeAt = 1;
+  let saccadeX = 0;
+  let saccadeY = 0;
+  let saccadeTargetX = 0;
+  let saccadeTargetY = 0;
+  let thinkingGazeTimer = 0;
+  let breathingBaseScales = [];
+  let torsoBones = [];
+  let loadRequestId = 0;
+  const reducedMotionQuery = globalThis.window?.matchMedia?.('(prefers-reduced-motion: reduce)');
+
+  function canRender() {
+    return Boolean(modelRoot && renderer && scene && camera && frameVisible && pageVisible);
+  }
+
+  function stopAnimation() {
+    if (animationScheduled) cancelAnimationFrame(animationFrame);
+    animationFrame = 0;
+    animationScheduled = false;
+    lastFrameTime = 0;
+  }
+
+  function scheduleAnimation() {
+    if (!animationScheduled && canRender()) {
+      animationScheduled = true;
+      animationFrame = requestAnimationFrame(animate);
+    }
+  }
+
+  function updateVisibility() {
+    pageVisible = typeof document === 'undefined' || document.visibilityState !== 'hidden';
+    if (canRender()) scheduleAnimation();
+    else stopAnimation();
+  }
+
+  function report(message, kind = 'info') {
+    status.textContent = message;
+    status.dataset.state = kind;
+    frame.setAttribute('aria-busy', String(kind === 'loading'));
+  }
+
+  function setState(nextState) {
+    avatarState = ['normal', 'listening', 'thinking', 'speaking', 'happy', 'error', 'offline'].includes(nextState)
+      ? nextState
+      : 'normal';
+    if (avatarState !== 'speaking') {
+      speechEnergy = 0;
+      speechNodStartedAt = -Infinity;
+      targetMouthValue = 0;
+      mouthViseme = 'aa';
+    }
+    const normalized = avatarState === 'normal' || avatarState === 'happy' ? 'idle'
+      : avatarState === 'error' ? 'offline' : avatarState;
+    if (Object.prototype.hasOwnProperty.call(targetStateMix, normalized)) {
+      for (const key of Object.keys(targetStateMix)) targetStateMix[key] = key === normalized ? 1 : 0;
+    }
+  }
+
+  function setMouth(value, { emphasis = false } = {}) {
+    targetMouthValue = Number.isFinite(value) ? THREE.MathUtils.clamp(value, 0, AVATAR_IDLE_LIFE_CONFIG.mouthCap) : 0;
+    if (avatarState === 'speaking') speechEnergy = targetMouthValue;
+    if (emphasis && avatarState === 'speaking') {
+      speechNodStartedAt = globalThis.performance?.now?.() ?? Date.now();
+      speechNodDuration = AVATAR_IDLE_LIFE_CONFIG.speechNodDurationMinMs
+        + Math.random() * (
+          AVATAR_IDLE_LIFE_CONFIG.speechNodDurationMaxMs
+          - AVATAR_IDLE_LIFE_CONFIG.speechNodDurationMinMs
+        );
+    }
+  }
+
+  function setViseme(viseme) {
+    mouthViseme = ['aa', 'ee', 'ih', 'oh', 'ou'].includes(viseme) ? viseme : 'aa';
+  }
+
+  function disposeModel() {
+    stopAnimation();
+    if (resizeObserver) resizeObserver.disconnect();
+    resizeObserver = null;
+    if (modelRoot && scene) scene.remove(modelRoot);
+    if (hologramRig && scene) scene.remove(hologramRig.root);
+    hologramRig?.dispose();
+    hologramRig = null;
+    if (gazeTarget && activeVrm?.lookAt?.target === gazeTarget) activeVrm.lookAt.target = previousLookAtTarget;
+    if (gazeTarget && scene) scene.remove(gazeTarget);
+    gazeTarget = null;
+    previousLookAtTarget = undefined;
+    if (activeVrm) {
+      VRMUtils.deepDispose(activeVrm.scene);
+    } else if (modelRoot) {
+      disposeScene(modelRoot);
+    }
+    modelRoot = null;
+    globeRig = null;
+    activeVrm = null;
+    mouthViseme = 'aa';
+    mouthValue = 0;
+    targetMouthValue = 0;
+    blinkStartedAt = 0;
+    lastFrameTime = 0;
+    activeTargets = [];
+    headNode = null;
+    eyeNodes = [];
+    eyeBaseRotations = [];
+    modelBasePosition.set(0, 0, 0);
+    mouthTargets = [];
+    blinkTargets = [];
+    smileTargets = [];
+    attentiveTargets = [];
+    thinkTargets = [];
+    frownTargets = [];
+    browTargets = [];
+    cheekTargets = [];
+    speakingTargets = [];
+    torsoBones = [];
+    builtInRig = null;
+    for (const expression of Object.keys(expressionValues)) expressionValues[expression] = 0;
+    if (renderer) {
+      renderer.dispose();
+      renderer = null;
+    }
+    scene = null;
+    camera = null;
+    frame.classList.remove('is-3d-active');
+    frame.classList.remove('is-globe-active');
+    stage.classList.remove('is-avatar-active', 'is-globe-active');
+    canvas.hidden = true;
+    if (image) image.classList.remove('is-3d-hidden');
+    if (mouthOverlay) mouthOverlay.hidden = false;
+  }
+
+  function configureRenderer() {
+    const quality = getAvatarRenderQuality();
+    renderer = createRenderer({
+      canvas,
+      alpha: true,
+      antialias: quality.antialias,
+      powerPreference: 'low-power',
+    });
+    renderer.setClearColor(0x000000, 0);
+    renderer.setPixelRatio(quality.pixelRatio);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(33, 1, 0.01, 100);
+    camera.position.set(0, 0, 3.2);
+    scene.add(new THREE.HemisphereLight(0xbdeaff, 0x071329, 2.2));
+    const keyLight = new THREE.DirectionalLight(0x9bdcff, 3.2);
+    keyLight.position.set(-1.5, 2, 3);
+    scene.add(keyLight);
+    const rimLight = new THREE.DirectionalLight(0x277bf1, 2.4);
+    rimLight.position.set(1.5, 0.5, -2);
+    scene.add(rimLight);
+    resizeObserver = new ResizeObserver(resize);
+    resizeObserver.observe(canvas);
+  }
+
+  function resize() {
+    if (!renderer || !camera) return;
+    const { width, height } = canvas.getBoundingClientRect();
+    if (!width || !height) return;
+    const pixelRatio = getAvatarRenderQuality().pixelRatio;
+    if (renderer.getPixelRatio() !== pixelRatio) renderer.setPixelRatio(pixelRatio);
+    renderer.setSize(width, height, false);
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+    if (globeRig) {
+      frameHolographicGlobe(camera);
+      if (reducedMotionQuery?.matches) scheduleAnimation();
+    }
+  }
+
+  function setInfluence(targets, value) {
+    applyMorphTargetInfluence(targets, value);
+  }
+
+  function configureIdleLifeBones() {
+    torsoBones = [];
+    const foundNames = [];
+    const candidates = [];
+    if (activeVrm?.humanoid) {
+      for (const name of ['chest', 'upperChest', 'spine']) {
+        const bone = activeVrm?.humanoid?.getNormalizedBoneNode(name);
+        if (bone) candidates.push(bone);
+      }
+    }
+    modelRoot?.traverse((object) => {
+      if (/^(?:spine|upperchest|chest)(?:[_ .-]|$)/i.test(object.name || '')) candidates.push(object);
+    });
+    for (const bone of candidates) {
+      if (torsoBones.includes(bone)) continue;
+      torsoBones.push(bone);
+      foundNames.push(bone.name || '(unnamed bone)');
+      bone.userData ||= {};
+      if (bone.scale?.clone) bone.userData.idleLifeBreathBase ||= bone.scale.clone();
+    }
+    const missing = activeVrm ? [] : ['chest', 'spine'].filter((name) => !foundNames.some((found) => found.toLowerCase().includes(name.toLowerCase())));
+    console.info(`[avatar idle-life] VRM/plain GLB torso bones found: ${foundNames.join(', ') || 'none'}. Missing: ${missing.join(', ') || 'none'}.`);
+  }
+
+  function animate(now) {
+    animationScheduled = false;
+    animationFrame = 0;
+    if (!canRender()) return;
+    if (lastFrameTime && now - lastFrameTime < (globeRig ? 1000 / 60 : 30)) {
+      scheduleAnimation();
+      return;
+    }
+
+    const seconds = idleLifeTime;
+    const deltaTime = lastFrameTime ? Math.min((now - lastFrameTime) / 1000, 0.05) : 1 / 60;
+    lastFrameTime = now;
+    if (!fpsWindowStartedAt) fpsWindowStartedAt = now;
+    fpsWindowFrames += 1;
+    if (now - fpsWindowStartedAt >= 3000) {
+      const averageFps = fpsWindowFrames * 1000 / (now - fpsWindowStartedAt);
+      if (hologramQuality === 'auto' && hologramRig && averageFps < 30) setHologramQuality('low');
+      fpsWindowStartedAt = now;
+      fpsWindowFrames = 0;
+    }
+    mouthValue = dampMouthOpening(mouthValue, targetMouthValue, deltaTime * 1000);
+    const visemeTargets = mouthTargets.filter(({ name }) => /viseme/i.test(name));
+    const expressionScale = reducedMotionQuery?.matches
+      ? 0.15
+      : hologramQuality === 'low' ? 0.65 : 1;
+    const expressionTargets = getAvatarExpressionProfile(avatarState, {
+      reducedMotion: Boolean(reducedMotionQuery?.matches),
+      quality: hologramQuality,
+    });
+    expressionTargets.speaking = avatarState === 'speaking' ? 0.04 * expressionScale : 0;
+    expressionTargets.brow = THREE.MathUtils.clamp(
+      expressionTargets.brow
+        + (avatarState === 'speaking' ? speechEnergy * AVATAR_IDLE_LIFE_CONFIG.speakingBrowLift * 0.28 * expressionScale : 0),
+      0,
+      AVATAR_IDLE_LIFE_CONFIG.maxFacialExpression,
+    );
+    expressionTargets.cheek = THREE.MathUtils.clamp(
+      expressionTargets.cheek
+        + (avatarState === 'speaking' ? speechEnergy * AVATAR_IDLE_LIFE_CONFIG.mouthCheekSoftness * 0.5 * expressionScale : 0),
+      0,
+      AVATAR_IDLE_LIFE_CONFIG.maxFacialExpression,
+    );
+    for (const [expression, target] of Object.entries(expressionTargets)) {
+      expressionValues[expression] = dampAvatarExpression(expressionValues[expression], target, deltaTime);
+    }
+    const { happy, attentive, thinking, frown, speaking } = expressionValues;
+    idleLifeTime += deltaTime;
+    for (const key of Object.keys(stateMix)) {
+      stateMix[key] = THREE.MathUtils.damp(
+        stateMix[key],
+        targetStateMix[key],
+        3 / AVATAR_IDLE_LIFE_CONFIG.stateTransitionSeconds,
+        deltaTime,
+      );
+    }
+    const liveliness = THREE.MathUtils.clamp(reducedMotionQuery?.matches ? 0.15 : AVATAR_IDLE_LIFE_CONFIG.liveliness, 0, 1);
+    const visemeOpening = mouthValue / Math.max(AVATAR_IDLE_LIFE_CONFIG.mouthCap, 0.001);
+    const avoidBlinkPeak = avatarState === 'speaking' && visemeOpening > 0.68;
+    if (!avoidBlinkPeak && !blinkStartedAt && blinkPhase >= 1 && idleLifeTime >= nextBlinkAt) {
+      blinkStartedAt = now;
+      blinkPhase = 0;
+      doubleBlinkPending = Math.random() < AVATAR_IDLE_LIFE_CONFIG.blink.doubleBlinkChance;
+      nextBlinkAt = idleLifeTime + AVATAR_IDLE_LIFE_CONFIG.blink.intervalMinSeconds
+        + Math.random() * (AVATAR_IDLE_LIFE_CONFIG.blink.intervalMaxSeconds - AVATAR_IDLE_LIFE_CONFIG.blink.intervalMinSeconds);
+    }
+    let blinkValue = 0;
+    if (blinkStartedAt) {
+      const close = AVATAR_IDLE_LIFE_CONFIG.blink.durationCloseSeconds;
+      const open = AVATAR_IDLE_LIFE_CONFIG.blink.durationOpenSeconds;
+      const elapsed = (now - blinkStartedAt) / 1000;
+      if (elapsed < close) blinkValue = THREE.MathUtils.smoothstep(elapsed / close, 0, 1);
+      else if (elapsed < close + open) blinkValue = 1 - THREE.MathUtils.smoothstep((elapsed - close) / open, 0, 1);
+      if (elapsed >= close + open) {
+        blinkStartedAt = 0;
+        if (doubleBlinkPending) {
+          doubleBlinkPending = false;
+          blinkStartedAt = now + 120;
+          blinkPhase = 0;
+        } else blinkPhase = 1;
+      }
+    }
+    if (globeRig) {
+      animateHolographicGlobe(globeRig, seconds, { reducedMotion: Boolean(reducedMotionQuery?.matches) });
+    } else if (builtInRig) {
+      builtInRig.seconds = seconds;
+      animateBuiltInAvatar(builtInRig, {
+        blinkValue,
+        mouthValue,
+        mouthViseme,
+        happy,
+        attentive,
+        thinking,
+        frown,
+      });
+    }
+
+    if (hologramRig) {
+      hologramRig.update(seconds, deltaTime, Boolean(reducedMotionQuery?.matches));
+      hologramRig.root.rotation.y = THREE.MathUtils.damp(hologramRig.root.rotation.y, parallaxX * 0.35, 8, deltaTime);
+      hologramRig.root.rotation.x = THREE.MathUtils.damp(hologramRig.root.rotation.x, parallaxY * 0.25, 8, deltaTime);
+      modelRoot?.traverse((object) => {
+        if (!object.isMesh || !object.material) return;
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        materials.forEach((material) => {
+          if (material.userData?.uHologramTime) material.userData.uHologramTime.value = seconds;
+        });
+      });
+    }
+
+    if (activeVrm) {
+      applyVrmExpressions(activeVrm.expressionManager, {
+        mouthViseme,
+        mouthValue,
+        blinkValue,
+        happy,
+        attentive,
+        thinking,
+        frown,
+        brow: expressionValues.brow,
+        cheek: expressionValues.cheek,
+        speaking: expressionValues.speaking,
+      });
+      activeVrm.update(deltaTime);
+    } else {
+      if (visemeTargets.length) {
+        const getViseme = (name) => name.match(/(?:viseme[\s._-]*)?(aa|a|ee|ih|oh|ou)$/i)?.[1].toLowerCase();
+        const hasRequestedViseme = visemeTargets.some(({ name }) => getViseme(name) === mouthViseme);
+        const fallbackTarget = visemeTargets.find(({ name }) => getViseme(name) === 'aa') || visemeTargets[0];
+        for (const target of visemeTargets) {
+          const targetViseme = getViseme(target.name);
+          const matches = hasRequestedViseme
+            ? targetViseme === mouthViseme
+            : target === fallbackTarget;
+          setInfluence([target], matches ? mouthValue : 0);
+        }
+      } else {
+        setInfluence(mouthTargets, mouthValue);
+      }
+      setInfluence(blinkTargets, blinkValue);
+      setInfluence(smileTargets, happy + stateMix.idle * AVATAR_IDLE_LIFE_CONFIG.idleSmile * liveliness);
+      setInfluence(attentiveTargets, attentive);
+      setInfluence(thinkTargets, thinking);
+      setInfluence(frownTargets, frown);
+      setInfluence(browTargets, expressionValues.brow);
+      setInfluence(cheekTargets, expressionValues.cheek);
+      setInfluence(speakingTargets, speaking);
+    }
+
+    const headAmount = THREE.MathUtils.degToRad(AVATAR_IDLE_LIFE_CONFIG.masterHead) * liveliness;
+    const listeningBoost = 1 + stateMix.listening * 0.2;
+    const thinkingStillness = 1 - stateMix.thinking * 0.82;
+    const pitchNoise = Math.sin(seconds / AVATAR_IDLE_LIFE_CONFIG.headPeriodsSeconds[0] * Math.PI * 2) * 0.7
+      + Math.sin(seconds / AVATAR_IDLE_LIFE_CONFIG.headPeriodsSeconds[1] * Math.PI * 2 + 1.4) * 0.3;
+    const yawNoise = Math.sin(seconds / AVATAR_IDLE_LIFE_CONFIG.headPeriodsSeconds[1] * Math.PI * 2 + 0.7)
+      + Math.sin(seconds / AVATAR_IDLE_LIFE_CONFIG.headPeriodsSeconds[2] * Math.PI * 2) * 0.45;
+    const rollNoise = Math.sin(seconds / AVATAR_IDLE_LIFE_CONFIG.headPeriodsSeconds[2] * Math.PI * 2 + 2.1) * 0.4;
+    const speechNod = speaking
+      ? getSpeechNodPulse(now - speechNodStartedAt, speechNodDuration, speechEnergy)
+      : 0;
+    const tilt = attentive * 0.008 - thinking * 0.006 - frown * 0.003
+      + pitchNoise * headAmount * listeningBoost * thinkingStillness + speechNod
+      + parallaxY * 0.35;
+    const yaw = -thinking * 0.008 + frown * 0.003
+      + yawNoise * headAmount * listeningBoost * thinkingStillness + parallaxX * 0.35;
+    const roll = happy * 0.008 + attentive * 0.004 - frown * 0.006
+      + rollNoise * headAmount * listeningBoost * thinkingStillness;
+    const referencePortrait = Boolean(builtInRig?.referencePortrait);
+    const headMotionScale = hologramQuality === 'low'
+      ? 0
+      : reducedMotionQuery?.matches ? AVATAR_IDLE_LIFE_CONFIG.reducedMotionHeadScale : 1;
+    const referencePortraitScale = referencePortrait
+      ? AVATAR_IDLE_LIFE_CONFIG.referencePortraitMotionScale
+      : 1;
+    if (headNode) applyHeadMotion(headNode, headBaseRotation, seconds, tilt, {
+      yaw,
+      roll,
+      motionScale: headMotionScale * referencePortraitScale,
+      pitchLimitDegrees: referencePortrait ? 0.5 : AVATAR_IDLE_LIFE_CONFIG.headPitchLimitDegrees,
+      yawLimitDegrees: referencePortrait ? 0.5 : AVATAR_IDLE_LIFE_CONFIG.headYawLimitDegrees,
+      rollLimitDegrees: referencePortrait ? 0.35 : AVATAR_IDLE_LIFE_CONFIG.headRollLimitDegrees,
+    });
+    if (idleLifeTime >= nextSaccadeAt) {
+      nextSaccadeAt = idleLifeTime + AVATAR_IDLE_LIFE_CONFIG.eyeSaccade.intervalMinSeconds
+        + Math.random() * (AVATAR_IDLE_LIFE_CONFIG.eyeSaccade.intervalMaxSeconds - AVATAR_IDLE_LIFE_CONFIG.eyeSaccade.intervalMinSeconds);
+      if (stateMix.thinking > 0.5) {
+        saccadeTargetX = 0.32 + Math.random() * 0.24;
+        saccadeTargetY = -0.18 - Math.random() * 0.18;
+      } else {
+        saccadeTargetX = (Math.random() * 2 - 1) * THREE.MathUtils.degToRad(AVATAR_IDLE_LIFE_CONFIG.eyeSaccade.angleDegrees);
+        saccadeTargetY = (Math.random() * 2 - 1) * THREE.MathUtils.degToRad(AVATAR_IDLE_LIFE_CONFIG.eyeSaccade.angleDegrees);
+      }
+      if (stateMix.speaking > 0.5) {
+        saccadeTargetX = (Math.random() * 2 - 1) * 0.003;
+        saccadeTargetY = (Math.random() * 2 - 1) * 0.003;
+      }
+    }
+    saccadeX = THREE.MathUtils.damp(saccadeX, saccadeTargetX, 18, deltaTime);
+    saccadeY = THREE.MathUtils.damp(saccadeY, saccadeTargetY, 18, deltaTime);
+    if (eyeNodes.length && !activeVrm?.lookAt) {
+      const gazeX = saccadeX * liveliness;
+      const gazeY = saccadeY * liveliness;
+      eyeNodes.forEach((eye, index) => {
+        const base = eyeBaseRotations[index];
+        eye.rotation.x = base.x + gazeY;
+        eye.rotation.y = base.y + gazeX;
+      });
+    }
+    if (gazeTarget && headNode) {
+      const headPosition = headNode.getWorldPosition(new THREE.Vector3());
+      gazeTarget.position.set(
+        headPosition.x + Math.sin(seconds * 0.31) * 0.08,
+        headPosition.y + Math.sin(seconds * 0.23) * 0.04,
+        headPosition.z + 1.5,
+      );
+    }
+    if (!globeRig) {
+      const breathing = Math.sin(idleLifeTime / AVATAR_IDLE_LIFE_CONFIG.breathingPeriodSeconds * Math.PI * 2);
+      const referencePortrait = Boolean(builtInRig?.referencePortrait);
+      modelRoot.position.y = modelBasePosition.y
+        + (referencePortrait ? 0 : breathing * 0.0015 * liveliness);
+      if (!referencePortrait) {
+        modelRoot.rotation.z = THREE.MathUtils.damp(
+          modelRoot.rotation.z,
+          Math.sin(idleLifeTime / AVATAR_IDLE_LIFE_CONFIG.swayPeriodSeconds * Math.PI * 2)
+            * THREE.MathUtils.degToRad(AVATAR_IDLE_LIFE_CONFIG.masterSway) * liveliness,
+          5,
+          deltaTime,
+        );
+      }
+      torsoBones.forEach((bone) => {
+        const base = bone.userData.idleLifeBreathBase;
+        if (!base) return;
+        bone.scale?.set?.(base.x * (1 + breathing * AVATAR_IDLE_LIFE_CONFIG.masterBreathing * liveliness * 0.5),
+          base.y, base.z * (1 + breathing * AVATAR_IDLE_LIFE_CONFIG.masterBreathing * liveliness * 0.5));
+      });
+    }
+    renderer.render(scene, camera);
+    if (!globeRig || !reducedMotionQuery?.matches) scheduleAnimation();
+  }
+
+  async function loadModel(file) {
+    if (unloaded) return false;
+    if (!file) return false;
+    const requestId = ++loadRequestId;
+    let projectionReplaced = false;
+    try {
+      validateAvatarFile(file);
+    } catch (error) {
+      report(error.message, 'error');
+      return false;
+    }
+
+    report('Reading the local avatar file...', 'loading');
+    let arrayBuffer;
+    try {
+      arrayBuffer = await readAvatarFile(file, (loaded, total) => {
+        if (total > 0) report(`Reading avatar file... ${Math.round((loaded / total) * 100)}%`, 'loading');
+      });
+      report('Validating and parsing the local avatar...', 'loading');
+      const gltf = await parseModel(arrayBuffer);
+      if (requestId !== loadRequestId) {
+        disposeParsedAvatar(gltf);
+        return false;
+      }
+      const root = gltf.scene;
+      const vrm = gltf.userData?.vrm || null;
+      const rig = inspectAvatarRig(root);
+      const { morphTargets, mouthTargets: newMouthTargets } = rig;
+      const expressionManager = vrm?.expressionManager;
+      const hasVrmMouth = ['aa', 'ee', 'ih', 'oh', 'ou'].some((name) => expressionManager?.getExpression(name));
+      if (!newMouthTargets.length && !hasVrmMouth) {
+        disposeParsedAvatar(gltf);
+        report(
+          `This model has no recognized mouth-open or speech viseme morph. ${modelRoot ? 'The current projection remains active.' : 'The portrait remains active.'}`,
+          'error',
+        );
+        return false;
+      }
+
+      const bounds = new THREE.Box3().setFromObject(root);
+      const size = bounds.getSize(new THREE.Vector3());
+      const center = bounds.getCenter(new THREE.Vector3());
+      if (!Number.isFinite(size.y) || size.y <= 0) {
+        disposeParsedAvatar(gltf);
+        report(
+          `This model has invalid dimensions. ${modelRoot ? 'The current projection remains active.' : 'The portrait remains active.'}`,
+          'error',
+        );
+        return false;
+      }
+
+      disposeModel();
+      projectionReplaced = true;
+      modelRoot = root;
+      activeVrm = vrm;
+      configureRenderer();
+      root.scale.setScalar(1.55 / size.y);
+      root.position.set(-center.x * root.scale.x, -center.y * root.scale.y, -center.z * root.scale.z);
+      modelBasePosition.copy(root.position);
+      scene.add(modelRoot);
+      configureIdleLifeBones();
+      attachHologram();
+      activeTargets = morphTargets;
+      root.traverse((object) => {
+        if (!headNode && /^(?:head|neck)(?:[_ .-]|$)/i.test(object.name)) headNode = object;
+      });
+      eyeNodes = [];
+      root.traverse((object) => {
+        if (/^(?:(?:left|right)[_. -]*eye|eye[_. -]*(?:left|right))$/i.test(object.name)) eyeNodes.push(object);
+      });
+      eyeBaseRotations = eyeNodes.map((eye) => eye.rotation.clone());
+      mouthTargets = newMouthTargets;
+      if (vrm?.humanoid) headNode = vrm.humanoid.getNormalizedBoneNode('head') || headNode;
+      headBaseRotation = (headNode || modelRoot).rotation.clone();
+      if (vrm?.lookAt && headNode) {
+        gazeTarget = new THREE.Object3D();
+        const headPosition = headNode.getWorldPosition(new THREE.Vector3());
+        gazeTarget.position.set(headPosition.x, headPosition.y, headPosition.z + 1.5);
+        scene.add(gazeTarget);
+        previousLookAtTarget = vrm.lookAt.target;
+        vrm.lookAt.target = gazeTarget;
+      }
+      frameAvatarPortrait(camera, modelRoot, headNode, { balancedPortrait: true });
+      blinkTargets = rig.blinkTargets;
+      smileTargets = rig.smileTargets;
+      browTargets = rig.browTargets;
+      cheekTargets = rig.cheekTargets;
+      speakingTargets = rig.speakingTargets;
+      attentiveTargets = rig.attentiveTargets;
+      thinkTargets = rig.thinkTargets;
+      frownTargets = rig.frownTargets;
+      builtInRig = null;
+      canvas.hidden = false;
+      if (image) image.classList.add('is-3d-hidden');
+      if (mouthOverlay) mouthOverlay.hidden = true;
+      frame.classList.add('is-3d-active');
+      stage.classList.add('is-avatar-active');
+      resize();
+      const expressions = [blinkTargets.length && 'blink', smileTargets.length && 'happy', attentiveTargets.length && 'listening', thinkTargets.length && 'thinking'].filter(Boolean);
+      const mouthDescription = hasVrmMouth
+        ? 'VRM aa/ee/ih/oh/ou expressions'
+        : newMouthTargets.map(({ name }) => name).join(', ');
+      const identity = vrm?.meta?.name ? ` ${vrm.meta.name}.` : '';
+      report(`3D avatar ready.${identity} Mouth: ${mouthDescription}. Face controls: ${expressions.join(', ') || (hasVrmMouth ? 'VRM expressions' : 'mouth only')}.`, 'ready');
+      scheduleAnimation();
+      return true;
+    } catch (error) {
+      if (requestId !== loadRequestId) return false;
+      if (projectionReplaced) disposeModel();
+      const fallback = modelRoot ? 'The current projection remains active.' : 'The portrait remains active.';
+      report(`Could not load this model: ${error.message || 'unsupported or invalid model'}. ${fallback}`, 'error');
+      return false;
+    }
+  }
+
+  function loadBuiltInAvatar() {
+    if (unloaded) return false;
+    if (!referenceImage) {
+      report('The master reference portrait could not load. Procedural avatar rendering is disabled.', 'error');
+      return false;
+    }
+    try {
+      const { root, rig } = createBuiltInAvatar(referenceImage);
+      const face = root.getObjectByName('face');
+      const bounds = new THREE.Box3().setFromObject(root);
+      const size = bounds.getSize(new THREE.Vector3());
+      const center = bounds.getCenter(new THREE.Vector3());
+      disposeModel();
+      configureRenderer();
+      modelRoot = root;
+      builtInRig = rig;
+      root.position.set(-center.x, -center.y, -center.z);
+      modelBasePosition.copy(root.position);
+      scene.add(modelRoot);
+      configureIdleLifeBones();
+      attachHologram();
+      headNode = rig.head;
+      headBaseRotation.copy(headNode.rotation);
+      frameAvatarPortrait(camera, modelRoot, headNode);
+      canvas.hidden = false;
+      if (image) image.classList.add('is-3d-hidden');
+      if (mouthOverlay) mouthOverlay.hidden = true;
+      frame.classList.add('is-3d-active');
+      stage.classList.add('is-avatar-active');
+      resize();
+      report('Stylized 3D avatar ready. Load a compatible local VRM or GLB for a realistic, fully rigged face.', 'ready');
+      scheduleAnimation();
+      return true;
+    } catch (error) {
+      disposeModel();
+      report(`Could not create the built-in avatar: ${error.message || 'WebGL is unavailable'}. The portrait remains active.`, 'error');
+      return false;
+    }
+  }
+
+  function attachHologram() {
+    if (!scene || !modelRoot) return;
+    if (hologramRig) {
+      scene.remove(hologramRig.root);
+      hologramRig.dispose();
+    }
+    const deviceQuality = getAvatarRenderQuality();
+    const quality = hologramQuality === 'auto'
+      ? deviceQuality.isLowPower || deviceQuality.pixelRatio <= 1 ? 'medium' : 'high'
+      : hologramQuality;
+    hologramRig = createHologramScene({ quality });
+    scene.add(hologramRig.root);
+    if (hologramMode) applyHologramMaterial(modelRoot);
+    hologramRig.setState(avatarState === 'normal' ? 'idle' : avatarState, 0);
+  }
+
+  function setHologramMode(enabled) {
+    hologramMode = Boolean(enabled);
+    if (!modelRoot) return;
+    if (hologramMode) applyHologramMaterial(modelRoot);
+    else removeHologramMaterial(modelRoot);
+  }
+
+  function setHologramQuality(quality) {
+    if (!['auto', 'high', 'medium', 'low'].includes(quality)) return;
+    hologramQuality = quality;
+    window.dispatchEvent(new CustomEvent('jarvis:hologram-quality-change', { detail: { quality } }));
+    if (hologramRig) attachHologram();
+    if (renderer) {
+      renderer.setPixelRatio(quality === 'low' ? 1 : Math.min(window.devicePixelRatio || 1, 2));
+      resize();
+    }
+  }
+
+  function setHologramState(state, level01 = 0) {
+    setState(state === 'normal' ? 'normal' : state);
+    hologramRig?.setState(state === 'normal' ? 'idle' : state, level01);
+  }
+
+  function setLiveliness(value) {
+    AVATAR_IDLE_LIFE_CONFIG.liveliness = THREE.MathUtils.clamp(Number(value), 0, 1);
+  }
+
+  function loadBuiltInGlobe() {
+    if (unloaded) return false;
+    let rig;
+    try {
+      rig = createHolographicGlobe();
+    } catch (error) {
+      disposeModel();
+      report(`Could not create the holographic Earth: ${error.message || 'WebGL is unavailable'}. The portrait remains active.`, 'error');
+      return false;
+    }
+
+    disposeModel();
+    try {
+      modelRoot = rig.root;
+      globeRig = rig;
+      modelRoot.scale.setScalar(GLOBE_RENDER_SCALE);
+      modelRoot.position.set(0, 0, 0);
+      configureRenderer();
+      scene.add(modelRoot);
+      canvas.hidden = false;
+      if (image) image.classList.remove('is-3d-hidden');
+      if (mouthOverlay) mouthOverlay.hidden = true;
+      frame.classList.add('is-3d-active', 'is-globe-active');
+      stage.classList.add('is-globe-active');
+      resize();
+      report('Holographic Earth online. Globe, orbital rings, and scan effects are active.', 'ready');
+      scheduleAnimation();
+      return true;
+    } catch (error) {
+      disposeModel();
+      report(`Could not create the holographic Earth: ${error.message || 'WebGL is unavailable'}. The portrait remains active.`, 'error');
+      return false;
+    }
+  }
+
+  const onFileInputChange = () => {
+    const [file] = fileInput.files || [];
+    loadModel(file);
+    fileInput.value = '';
+  };
+  const onModelButtonClick = () => fileInput.click();
+  const onAvatarState = (event) => setState(event.detail?.state);
+  const onHologramState = (event) => {
+    setHologramState(event.detail?.state, event.detail?.level);
+  };
+  const onAvatarMouth = (event) => setMouth(event.detail?.value, { emphasis: event.detail?.emphasis });
+  const onContextLost = (event) => {
+    event.preventDefault();
+    loadRequestId += 1;
+    disposeModel();
+    report('3D rendering stopped. The photographic avatar is active.', 'error');
+    if (typeof CustomEvent !== 'undefined') {
+      window.dispatchEvent?.(new CustomEvent('jarvis:avatar-projection-fallback'));
+    }
+  };
+  fileInput?.addEventListener('change', onFileInputChange);
+  modelButton?.addEventListener('click', onModelButtonClick);
+  window.addEventListener('jarvis:avatar-state', onAvatarState);
+  window.addEventListener('jarvis:hologram-state', onHologramState);
+  window.addEventListener('jarvis:avatar-mouth', onAvatarMouth);
+  canvas.addEventListener('webglcontextlost', onContextLost);
+
+  if (typeof IntersectionObserver !== 'undefined') {
+    intersectionObserver = new IntersectionObserver(([entry]) => {
+      frameVisible = Boolean(entry?.isIntersecting);
+      updateVisibility();
+    });
+    intersectionObserver.observe(frame);
+  }
+  const updatePointerParallax = (event) => {
+    const bounds = stage?.getBoundingClientRect?.();
+    if (!bounds?.width || !bounds?.height) return;
+    ({ x: parallaxX, y: parallaxY } = clampAvatarParallax(
+      ((event.clientX - bounds.left) / bounds.width - 0.5) * 0.12,
+      ((event.clientY - bounds.top) / bounds.height - 0.5) * 0.08,
+    ));
+  };
+  const resetPointerParallax = () => {
+    parallaxX = 0;
+    parallaxY = 0;
+  };
+  const updateOrientationParallax = (event) => {
+    if (!Number.isFinite(event.gamma) || !Number.isFinite(event.beta)) return;
+    ({ x: parallaxX, y: parallaxY } = clampAvatarParallax(
+      event.gamma / 360,
+      (event.beta - 45) / 360,
+    ));
+  };
+  async function enableDeviceOrientation() {
+    if (!globalThis.DeviceOrientationEvent) return false;
+    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+      const permission = await DeviceOrientationEvent.requestPermission();
+      if (permission !== 'granted') return false;
+    }
+    if (unloaded) return false;
+    window.addEventListener('deviceorientation', updateOrientationParallax, { passive: true });
+    return true;
+  }
+  const onReducedMotionChange = () => {
+    if (canRender()) scheduleAnimation();
+  };
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', updateVisibility);
+  window.addEventListener('resize', resize, { passive: true });
+  window.addEventListener('orientationchange', resize, { passive: true });
+  if (typeof stage?.addEventListener === 'function') {
+    stage.addEventListener('pointermove', updatePointerParallax, { passive: true });
+    stage.addEventListener('pointerleave', resetPointerParallax, { passive: true });
+  }
+  reducedMotionQuery?.addEventListener?.('change', onReducedMotionChange);
+
+  function unloadModel() {
+    if (unloaded) return;
+    unloaded = true;
+    loadRequestId += 1;
+    disposeModel();
+    intersectionObserver?.disconnect();
+    intersectionObserver = null;
+    globalThis.document?.removeEventListener?.('visibilitychange', updateVisibility);
+    window.removeEventListener?.('resize', resize);
+    window.removeEventListener?.('orientationchange', resize);
+    window.removeEventListener?.('jarvis:avatar-state', onAvatarState);
+    window.removeEventListener?.('jarvis:hologram-state', onHologramState);
+    window.removeEventListener?.('jarvis:avatar-mouth', onAvatarMouth);
+    window.removeEventListener?.('deviceorientation', updateOrientationParallax);
+    canvas.removeEventListener?.('webglcontextlost', onContextLost);
+    fileInput?.removeEventListener?.('change', onFileInputChange);
+    modelButton?.removeEventListener?.('click', onModelButtonClick);
+    stage?.removeEventListener?.('pointermove', updatePointerParallax);
+    stage?.removeEventListener?.('pointerleave', resetPointerParallax);
+    reducedMotionQuery?.removeEventListener?.('change', onReducedMotionChange);
+  }
+
+  return {
+    loadModel,
+    loadBuiltInAvatar,
+    loadBuiltInGlobe,
+    getActiveMode: () => (globeRig ? 'earth' : modelRoot ? 'avatar' : ''),
+    setState,
+    setMouth,
+    setViseme,
+    setHologramMode,
+    setHologramState,
+    setHologramQuality,
+    setLiveliness,
+    enableDeviceOrientation,
+    unload: unloadModel,
+  };
+}

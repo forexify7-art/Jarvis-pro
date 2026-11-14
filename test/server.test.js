@@ -1,0 +1,1814 @@
+import { after, before, test } from 'node:test';
+import assert from 'node:assert/strict';
+import { request as httpRequest } from 'node:http';
+import { readFile } from 'node:fs/promises';
+import { createAppServer, getAssistantText } from '../server.js';
+import { getForwardedUrl, getServerEnvironment } from '../scripts/codespaces.js';
+import { detectDeviceProfile } from '../public/device-monitor.js';
+
+function fetchViaLoopbackAddress(url, options = {}, localAddress = '127.0.0.2') {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(url, {
+      method: options.method || 'GET',
+      headers: options.headers,
+      localAddress,
+    }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => {
+        const headers = Object.fromEntries(
+          Object.entries(response.headers)
+            .filter(([, value]) => typeof value === 'string'),
+        );
+        resolve(new Response(Buffer.concat(chunks), {
+          status: response.statusCode,
+          headers,
+        }));
+      });
+    });
+    request.on('error', reject);
+    if (options.body !== undefined) request.write(options.body);
+    request.end();
+  });
+}
+
+const previousEnvironment = new Map();
+for (const key of ['AI_API_KEY', 'GEMINI_API_KEY', 'AI_BASE_URL', 'AI_MODEL', 'AI_PROVIDER', 'OLLAMA_BASE_URL', 'OLLAMA_MODEL', 'HOME_ASSISTANT_URL', 'HOME_ASSISTANT_TOKEN', 'HOME_ASSISTANT_ENTITIES', 'HOME_ASSISTANT_CONTROL_ENTITIES', 'APP_ACCESS_TOKEN', 'NODE_ENV']) {
+  previousEnvironment.set(key, process.env[key]);
+  delete process.env[key];
+}
+
+const server = createAppServer();
+let baseUrl;
+
+function makeVisionJpeg(width = 1_280, height = 720) {
+  return Buffer.from([
+    0xff, 0xd8,
+    0xff, 0xc0, 0x00, 0x11,
+    0x08, (height >> 8) & 0xff, height & 0xff,
+    (width >> 8) & 0xff, width & 0xff,
+    0x03, 0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00,
+    0xff, 0xd9,
+  ]);
+}
+
+before(async () => {
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  baseUrl = `http://127.0.0.1:${server.address().port}`;
+});
+
+after(async () => {
+  await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  for (const [key, value] of previousEnvironment) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+});
+
+test('serves the app shell with restrictive browser security headers', async () => {
+  const response = await fetch(baseUrl);
+  const html = await response.text();
+  const portraitResponse = await fetch(`${baseUrl}/jarvis-portrait.webp`);
+  assert.equal(response.status, 200);
+  assert.equal(portraitResponse.status, 200);
+  assert.match(portraitResponse.headers.get('content-type'), /image\/webp/);
+  assert.match(response.headers.get('content-type'), /text\/html/);
+  assert.match(response.headers.get('cache-control'), /no-cache/);
+  assert.match(response.headers.get('content-security-policy'), /default-src 'self'/);
+  assert.match(response.headers.get('content-security-policy'), /img-src 'self' data: blob:/);
+  assert.match(response.headers.get('content-security-policy'), /connect-src 'self' wss:\/\/generativelanguage\.googleapis\.com/);
+  assert.match(html, /J\.A\.R\.V\.I\.S\./);
+  assert.match(html, /apple-mobile-web-app-capable/);
+  assert.match(html, /apple-touch-icon/);
+  assert.match(html, /Use temporarily/);
+  assert.match(html, /Use deployment environment/);
+  assert.match(html, /GEMINI_API_KEY in the server/);
+});
+
+test('serves voice modules from the voice folder without allowing path traversal', async () => {
+  const expectedModule = await readFile(new URL('../voice/speech-input.js', import.meta.url), 'utf8');
+  const response = await fetch(`${baseUrl}/voice/speech-input.js`);
+  const traversalResponse = await fetch(`${baseUrl}/voice/%2e%2e%2fpublic/index.html`);
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type'), /text\/javascript/);
+  assert.equal(await response.text(), expectedModule);
+  assert.equal(traversalResponse.status, 403);
+});
+
+test('normalizes Gemini text parts and rejects empty provider text', () => {
+  assert.equal(getAssistantText('  Plain response.  '), 'Plain response.');
+  assert.equal(getAssistantText([
+    { type: 'text', text: 'First ' },
+    { type: 'image_url', image_url: { url: 'https://example.invalid/image.png' } },
+    { type: 'text', text: 'second.' },
+  ]), 'First second.');
+  assert.equal(getAssistantText([]), '');
+  assert.equal(getAssistantText({ text: 'not an OpenAI text part' }), '');
+});
+
+test('detects mobile, tablet, Windows, browser, and platform hints', () => {
+  assert.deepEqual(detectDeviceProfile({
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0',
+    userAgentData: { mobile: false, platform: 'Windows' },
+  }), {
+    deviceType: 'Desktop',
+    isMobile: false,
+    browser: 'Microsoft Edge',
+    platform: 'Windows',
+  });
+  assert.deepEqual(detectDeviceProfile({
+    userAgent: 'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 Chrome/130.0.0.0 Mobile Safari/537.36',
+    userAgentData: { mobile: true, platform: 'Android' },
+  }), {
+    deviceType: 'Mobile device',
+    isMobile: true,
+    browser: 'Chrome',
+    platform: 'Android',
+  });
+  assert.deepEqual(detectDeviceProfile({
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) AppleWebKit/605.1.15 Version/18.0 Safari/605.1.15',
+    platform: 'MacIntel',
+    maxTouchPoints: 5,
+  }), {
+    deviceType: 'Tablet',
+    isMobile: true,
+    browser: 'Safari',
+    platform: 'iOS',
+  });
+});
+
+test('provides every client-selected element and the avatar/mobile controls', async () => {
+  const html = await (await fetch(baseUrl)).text();
+  const client = await (await fetch(`${baseUrl}/app.js`)).text();
+  const appHub = await (await fetch(`${baseUrl}/app-hub.js`)).text();
+  const searchSummary = await (await fetch(`${baseUrl}/search-summary.js`)).text();
+  const deviceMonitor = await (await fetch(`${baseUrl}/device-monitor.js`)).text();
+  const shareLink = await (await fetch(`${baseUrl}/share-link.js`)).text();
+  const diagnostics = await (await fetch(`${baseUrl}/diagnostics.js`)).text();
+  const workerResponse = await fetch(`${baseUrl}/service-worker.js`);
+  const worker = await workerResponse.text();
+  assert.match(workerResponse.headers.get('cache-control'), /no-cache/);
+  const styles = await (await fetch(`${baseUrl}/styles.css`)).text();
+  assert.match(client, /^import \{/);
+  assert.match(client, /initializeAppHubs/);
+  assert.match(client, /initializeAppHubs\(\{\s*onActivity: logActivity,\s*onOpenVision: openVisionDialog,\s*canLaunchIntent: \(\) => state\.preferences\.fullAccessEnabled,\s*openDesktopExternal: window\.jarvisDesktop\?\.openExternalUrl\.bind\(window\.jarvisDesktop\),\s*copyUserText: copyTextToClipboard,\s*\}\)/);
+  assert.match(client, /window\.jarvisDesktop\?\.copyText/);
+  assert.match(html, /data-hub-action="copy-text"/);
+  assert.match(client, /from '\.\/app-hub\.js'/);
+  assert.match(appHub, /jarvis\.app-hub\.v1/);
+  assert.match(appHub, /function renderShortcuts/);
+  assert.match(client, /from '\.\/search-summary\.js'/);
+  assert.match(searchSummary, /createSearchSummaryPrompt/);
+  assert.match(client, /Summarize with AI/);
+  assert.match(client, /AI summaries are unavailable because no AI provider is configured/);
+  assert.match(client, /contextOverride: \[\{ role: 'user', content: prompt \}\]/);
+  const searchHandler = client.slice(client.indexOf('async function searchWeb'), client.indexOf('function summarizeSearchResults'));
+  assert.doesNotMatch(searchHandler, /\/api\/chat|summarizeSearchResults/);
+  assert.match(client, /cache: 'no-store'/);
+  assert.match(client, /requestSequence !== healthRequestSequence/);
+  assert.doesNotMatch(client, /from '\.\/avatar3d\.bundle\.js'/);
+  assert.match(worker, /\/avatar3d\.bundle\.js\?avatar=7/);
+  assert.match(worker, /avatar-cues\.js/);
+  const selectedIds = [...client.matchAll(/querySelector\('#([\w-]+)'\)/g)].map((match) => match[1]);
+  const missingIds = [...new Set(selectedIds)].filter((id) => !html.includes(`id="${id}"`));
+  assert.deepEqual(missingIds, []);
+  assert.match(html, /id="speech-audio-file"[^>]*type="file"[^>]*accept="audio\/\*"/);
+  assert.match(html, /id="speech-audio-preview"[^>]*controls[^>]*hidden/);
+  assert.match(client, /speechAudioFile\.addEventListener\('change'/);
+  assert.match(client, /URL\.createObjectURL\(file\)/);
+  assert.match(client, /URL\.revokeObjectURL\(speechAudioPreviewUrl\)/);
+  const documentIds = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
+  assert.equal(new Set(documentIds).size, documentIds.length, 'HTML IDs must be unique');
+  assert.match(html, /class="presence"/);
+  assert.match(html, /id="holo-stage"/);
+  assert.match(html, /<section class="presence"[\s\S]*?id="holo-state-strip"[\s\S]*?<\/section>\s*<div class="dashboard-commandbar"/);
+  assert.match(html, /id="ai-avatar" src="\/jarvis-portrait\.webp"/);
+  assert.match(html, /class="avatar-frame portrait-cutout-frame"/);
+  assert.match(html, /class="ai-avatar is-normal portrait-cutout-image" id="ai-avatar"/);
+  assert.doesNotMatch(html, /ai-avatar\.jpg/);
+  assert.doesNotMatch(html, /avatar-shortcuts/);
+  assert.equal((html.match(/class="orbit orbit-(?:one|two)"/g) || []).length, 2);
+  assert.match(html, /class="holo-sphere-shell" aria-hidden="true"/);
+  assert.match(html, /class="holo-emitter" aria-hidden="true"/);
+  assert.doesNotMatch(html, /class="orbit orbit-three"|class="holo-grid"|class="core-halo"/);
+  assert.match(html, /class="avatar-model-controls"/);
+  assert.match(html, /id="activate-3d-avatar"[^>]*>Activate 3D Avatar</);
+  assert.match(html, /id="activate-holographic-earth"[^>]*>Activate Holographic Earth</);
+  assert.match(html, /id="load-custom-avatar"[^>]*>Load Custom Avatar</);
+  assert.match(html, /id="avatar-model-file"[^>]*accept="\.vrm,\.glb/);
+  assert.match(client, /customAvatarButton\.addEventListener\('click', \(\) => elements\.customAvatarFile\.click\(\)\)/);
+  assert.match(client, /async function loadCustomAvatar\(file\)/);
+  assert.match(client, /const loaded = await avatar\.loadModel\(file\)/);
+  assert.match(html, /id="avatar-canvas"[^>]*aria-hidden="true" hidden/);
+  assert.match(html, /data-blink="open" data-viseme="neutral" data-speaking="false"/);
+  assert.match(html, /class="portrait-head" aria-hidden="true"/);
+  assert.match(html, /class="portrait-blink-image" src="\/jarvis-portrait-eyes-closed\.webp"/);
+  assert.match(html, /class="portrait-mouth-canvas"/);
+  assert.match(html, /class="portrait-head-content"/);
+  assert.match(client, /--portrait-eye-width/);
+  assert.match(client, /--portrait-chin-x/);
+  assert.doesNotMatch(client, /ensurePortraitAvatarActive/);
+  assert.doesNotMatch(client, /setTimeout\(\(\) => activateHolographicEarth\(\), 120\)/);
+  assert.match(styles, /body\.new-interface \.holo-stage > \.avatar-canvas\[hidden\] \{[\s\S]*?display: none !important/);
+  assert.match(styles, /body\.new-interface \.holo-stage\.is-avatar-active > \.avatar-canvas:not\(\[hidden\]\)[\s\S]*?visibility: visible !important/);
+  assert.match(styles, /body\.new-interface \.holo-stage\.is-globe-active > \.avatar-canvas:not\(\[hidden\]\) \{[\s\S]*?inset: auto !important;[\s\S]*?top: 50% !important;[\s\S]*?transform: translate\(-50%, -50%\) !important/);
+  assert.match(styles, /body\.new-interface \.holo-stage\.is-avatar-active:not\(\.is-globe-active\) \.portrait-artwork \{[\s\S]*?visibility: hidden/);
+  assert.doesNotMatch(styles, /portrait-cutout-image\.is-3d-hidden \{\s*display: block !important/);
+  assert.match(styles, /\.portrait-cutout-frame\[data-blink="closed"\] \.portrait-blink-image/);
+  assert.match(styles, /mask-image: linear-gradient\(to bottom, #000 0 52%, transparent 64%\)/);
+  assert.match(styles, /\.portrait-head-content \{[\s\S]*?transform-origin: 51\.5% 58%/);
+  assert.match(html, /News &amp; Briefing|news-button|briefing-panel|briefing-results/i);
+  assert.match(html, /id="task-priority"/);
+  assert.match(html, /id="insight-total-tasks"/);
+  assert.match(html, /id="insight-focus-sessions"/);
+  assert.match(html, /id="insight-next-action"/);
+  assert.match(html, /id="priority-accept"/);
+  assert.match(html, /id="priority-dismiss"/);
+  assert.match(client, /getTaskPrioritySummary/);
+  assert.match(client, /Focus timer started: \$\{task\.title\}/);
+  assert.match(html, /id="notes-section"/);
+  assert.match(html, /id="tasks-section"/);
+  for (const [sectionId, headingId] of [
+    ['notes-section', 'notes-title'],
+    ['tasks-section', 'tasks-title'],
+  ]) {
+    assert.match(html, new RegExp(`<details class="planner-section dashboard-disclosure" id="${sectionId}"[^>]*open>`));
+    assert.match(html, new RegExp(`<summary class="planner-section-heading">[\\s\\S]*?id="${headingId}"[\\s\\S]*?class="disclosure-mark"`));
+  }
+  assert.match(client, /parseSmartCommand/);
+  assert.match(client, /function executeSmartCommand/);
+  assert.match(client, /function activate3DAvatar\(\) \{\s*return activate3DProjection\('avatar'\)/);
+  assert.match(client, /function activateHolographicEarth\(\) \{\s*return activate3DProjection\('earth'\)/);
+  assert.match(client, /import\('\/avatar3d\.bundle\.js\?avatar=7'\)/);
+  assert.match(client, /if \(!avatar3dActivated\) return;/);
+  assert.doesNotMatch(client, /\bsetAvatarMouth\b|toggleAudioLipSync/);
+  assert.match(client, /utterance\.onpause/);
+  assert.match(client, /utterance\.onresume/);
+  assert.match(html, /id="full-access-toggle"/);
+  assert.match(html, /id="full-access-mobile-toggle"/);
+  assert.match(html, /class="mobile-nav"/);
+  assert.match(html, /id="file-input"/);
+  assert.match(html, /id="dashboard-layout"/);
+  assert.match(html, /<div class="dashboard-layout" id="dashboard-layout">/);
+  assert.match(html, /id="conversation-view"/);
+  assert.match(html, /<section class="conversation" id="conversation-view"[^>]*hidden/);
+  assert.doesNotMatch(html, /New Interface|Old Interface|interface-switcher/);
+  assert.match(html, /id="dashboard-transcript"/);
+  assert.match(html, /id="conversation-chat-state"[^>]*role="status"[^>]*aria-live="polite"[^>]*hidden/);
+  assert.match(html, /id="conversation-chat-state-label"/);
+  assert.match(html, /id="conversation-retry-button"[^>]*>Retry request</);
+  assert.match(client, /conversationChatState: document\.querySelector\('#conversation-chat-state'\)/);
+  assert.match(client, /container\.hidden = !message;[\s\S]*?label\.textContent = translateUiText\(message, state\.preferences\.language\);[\s\S]*?retryButton\.hidden = !canRetry;/);
+  assert.match(client, /elements\.conversationRetryButton\.addEventListener\('click', retryLastChat\)/);
+  const retryHandler = client.match(/function retryLastChat\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
+  assert.match(retryHandler, /if \(state\.pending \|\| !state\.lastChatFailure\) return/);
+  assert.match(retryHandler, /sendChat\(failure\.text/);
+  assert.doesNotMatch(retryHandler, /addMessage|state\.messages\.push/);
+  assert.match(styles, /\.conversation-chat-state\[data-state="thinking"\]::before/);
+  assert.match(styles, /\.conversation-chat-state\[data-state="error"\]/);
+  assert.match(html, /class="right-rail"/);
+  assert.doesNotMatch(html, /class="assistant-greeting"|class="assistant-identity"/);
+  assert.match(html, /class="dashboard-panel state-panel"/);
+  assert.match(html, /id="dashboard-voice-mic-button"/);
+  assert.match(html, /id="dashboard-chat-title">Chat History/);
+  for (const [panelClass, titleId] of [
+    ['dashboard-chat-panel', 'dashboard-chat-title'],
+    ['planner-panel', 'planner-title'],
+    ['smart-memory-panel', 'smart-memory-title'],
+  ]) {
+    assert.match(html, new RegExp(`<details class="dashboard-panel dashboard-disclosure ${panelClass}"[^>]*open>`));
+    assert.match(html, new RegExp(`<summary[^>]*>[\\s\\S]*?id="${titleId}"[\\s\\S]*?class="disclosure-mark"`));
+  }
+  assert.match(html, /id="system-title">Real-Time Info/);
+  assert.match(html, /id="quick-title">Quick Actions/);
+  assert.match(html, /id="dashboard-command-form"/);
+  assert.match(html, /id="dashboard-mic-button"/);
+  assert.match(html, /id="dashboard-message"/);
+  assert.ok(html.indexOf('class="presence"') < html.indexOf('class="right-rail"'));
+  assert.ok(html.indexOf('class="presence"') < html.indexOf('class="dashboard-panel state-panel"'));
+  assert.ok(html.indexOf('class="dashboard-panel state-panel"') < html.indexOf('class="right-rail"'));
+  assert.ok(html.indexOf('class="presence"') < html.indexOf('id="holo-state-strip"'));
+  assert.ok(html.indexOf('id="holo-state-strip"') < html.indexOf('class="right-rail"'));
+  assert.ok(html.indexOf('id="holo-state-strip"') < html.indexOf('id="dashboard-command-form"'));
+  assert.ok(html.indexOf('id="dashboard-command-form"') < html.indexOf('class="right-rail"'));
+  assert.ok(html.indexOf('id="dashboard-voice-title"') < html.indexOf('id="dashboard-chat-title"'));
+  assert.ok(html.indexOf('id="dashboard-chat-title"') < html.indexOf('id="system-title"'));
+  assert.ok(html.indexOf('id="system-title"') < html.indexOf('id="quick-title"'));
+  assert.match(html, /id="presence-title">At your service\./);
+  assert.match(html, /class="holo-sphere-shell"/);
+  assert.match(html, /class="holo-emitter"/);
+  assert.match(html, /alt="J\.A\.R\.V\.I\.S\. female assistant portrait"/);
+  assert.match(html, /id="holo-waveform"[^>]+role="img"/);
+  assert.deepEqual([...html.matchAll(/data-holo-state="([^"]+)"/g)].map((match) => match[1]), [
+    'listening', 'thinking', 'speaking', 'online',
+  ]);
+  assert.match(html, /id="holo-state-announcement"[^>]+aria-live="polite"/);
+  assert.match(html, /id="dashboard-voice-title">Voice Assistant/);
+  assert.match(html, /id="briefing-title">News &amp; Briefing/);
+  assert.match(html, /id="news-button"[^>]*data-requires-full-access/);
+  assert.match(html, /id="briefing-results"[^>]*aria-live="polite"/);
+  assert.match(html, /id="activity-title">Activity feed/);
+  assert.match(html, /aria-label="Dashboard quick navigation"/);
+  assert.match(html, /id="activity-panel"/);
+  assert.equal([...html.matchAll(/dashboard-chat-panel/g)].length, 1);
+  assert.match(html, /id="voice-waveform"/);
+  assert.match(html, /id="cpu-meter-track"/);
+  assert.match(html, /id="ram-meter-track"/);
+  assert.match(html, /id="disk-meter-track"/);
+  assert.match(html, /id="device-type-value"/);
+  assert.match(html, /id="platform-value"/);
+  assert.match(html, /id="battery-value"/);
+  assert.match(html, /id="browser-memory-value"/);
+  assert.match(html, /id="backend-connection-value"/);
+  assert.match(html, /class="metric-section-heading"><span>SERVER<\/span>/);
+  assert.match(html, /class="metric-section-heading"><span>THIS DEVICE<\/span>/);
+  assert.match(html, /data-device-group="mobile"/);
+  assert.match(html, /class="new-feature-bar"/);
+  assert.match(html, /data-nav="chat"/);
+  assert.match(html, /data-dashboard-feature="chat"/);
+  assert.match(client, /closest\('\[data-dashboard-feature\], \[data-avatar-feature\]'\)/);
+  assert.match(client, /document\.querySelector\('\.new-feature-bar'\)\.addEventListener\('click', handleDashboardFeature\)/);
+  assert.match(client, /document\.querySelector\('\.avatar-hero'\)\.addEventListener\('click', handleDashboardFeature\)/);
+  assert.match(client, /async function loadBriefing\(\)/);
+  assert.match(client, /briefingButton\.addEventListener\('click', loadBriefing\)/);
+  assert.match(client, /destination === 'news'[\s\S]*?loadBriefing\(\)/);
+  assert.doesNotMatch(client, /mobile-(news|system|activity)-open/);
+  assert.match(html, /class="feature-toolbar"/);
+  const featureToolbar = html.match(/<nav class="feature-toolbar"[\s\S]*?<\/nav>/)?.[0] || '';
+  assert.equal([...featureToolbar.matchAll(/<svg\b/g)].length, 7);
+  assert.deepEqual([...featureToolbar.matchAll(/<span>([^<]+)<\/span>/g)].map((match) => match[1]), [
+    'Chat', 'Voice', 'Files', 'Applications', 'System', 'Memory', 'Settings',
+  ]);
+  assert.doesNotMatch(featureToolbar, /toolbar-icon">/);
+  assert.match(html, /id="left-ai-status"/);
+  assert.match(html, /id="left-mic-status"/);
+  assert.match(html, /id="left-memory-status"/);
+  assert.doesNotMatch(html, /Image AI|image-generation|generate-image-button|image-prompt-input/i);
+  assert.equal([...html.matchAll(/data-app-hub/g)].length, 2);
+  assert.equal([...html.matchAll(/data-hub-action="vision" data-requires-full-access/g)].length, 2);
+  assert.equal([...html.matchAll(/data-hub-action="vision"/g)].length, 2);
+  assert.equal([...html.matchAll(/id="screen-capture-dialog"/g)].length, 1);
+  assert.match(html, /JARVIS APP HUB/);
+  assert.match(html, /data-hub-search/);
+  assert.match(html, /data-hub-apps/);
+  assert.match(html, /data-hub-runner/);
+  assert.match(html, /data-hub-field="icon"[^>]*accept="image\/png,image\/jpeg,image\/webp"/);
+  assert.equal([...html.matchAll(/data-quick-action="capture"/g)].length, 2);
+  assert.match(html, /id="capture-frame-preview"[^>]*hidden/);
+  assert.match(html, /id="vision-send-button"[^>]*disabled/);
+  assert.match(html, /id="stop-capture-button"[^>]*>Emergency Stop/);
+  assert.match(html, /id="vision-question"[^>]*maxlength="500"[^>]*disabled/);
+  assert.match(client, /document\.querySelectorAll\('\[data-quick-action="capture"\]'\)/);
+  assert.match(client, /elements\.visionSendButton\.addEventListener\('click', sendVisionFrame\)/);
+  assert.match(client, /fetch\('\/api\/vision'/);
+  assert.match(client, /elements\.visionQuestion\.disabled = false/);
+  assert.match(client, /function emergencyStopVision\(\)/);
+  assert.match(client, /state\.visionAbortController\?\.abort\(\)/);
+  assert.match(client, /if \(!state\.preferences\.fullAccessEnabled\) \{\s+emergencyStopVision\(\)/);
+  assert.match(client, /createSearchSummaryPrompt/);
+  assert.match(client, /function summarizeSearchResults\(data, prompt\)/);
+  const captureHandler = client.slice(client.indexOf('async function captureScreenFrame'), client.indexOf('async function sendVisionFrame'));
+  assert.doesNotMatch(captureHandler, /\/api\/vision|fetch\(/);
+  assert.match(html, /app\.js\?avatar=67/);
+  assert.match(html, /APKs (?:and|or) native (?:apps|applications) cannot run/);
+  assert.match(html, /Only HTTP\/HTTPS websites and explicit Android intent links are accepted/);
+  assert.match(html, /class="voice-console"/);
+  assert.match(html, /id="dashboard-mic-button"/);
+  assert.match(html, /id="dashboard-mic-button"[^>]*aria-pressed="false"/);
+  assert.match(html, /id="voice-console-status"/);
+  assert.match(html, /id="system-title">Real-Time Info/);
+  assert.match(html, /id="quick-title">Quick Actions/);
+  assert.match(html, /id="dashboard-attach-button"/);
+  assert.match(html, /id="dashboard-attach-button"/);
+  assert.match(html, /id="dashboard-command-form"/);
+  assert.match(html, /id="history-dialog"/);
+  assert.match(html, /id="file-search-dialog"/);
+  assert.match(html, /id="screen-capture-dialog"/);
+  assert.match(html, /id="application-dialog"/);
+  assert.match(html, /id="more-navigation-dialog"/);
+  assert.match(html, /id="focus-timer-button"/);
+  assert.match(html, /id="ai-settings-form"/);
+  assert.match(html, /id="share-title">Share JARVIS/);
+  assert.match(html, /id="share-link-button"/);
+  assert.match(html, /id="copy-link-button"/);
+  assert.match(html, /id="share-status"/);
+  assert.match(html, /APP_ACCESS_TOKEN before exposing it/);
+  assert.match(client, /getPublicShareUrl/);
+  assert.match(shareLink, /url\.protocol !== 'https:'/);
+  assert.match(html, /id="ai-provider-select"/);
+  assert.match(html, /id="ai-model-input"/);
+  assert.match(html, /id="ai-base-url"/);
+  assert.match(html, /id="ai-api-key"/);
+  assert.match(html, /id="study-quick-indicator"/);
+  for (const destination of ['history', 'files', 'applications', 'study', 'productivity', 'system']) {
+    assert.match(html, new RegExp(`data-nav="${destination}"`));
+  }
+  for (const action of ['capture', 'files', 'applications', 'search', 'chat', 'study']) {
+    assert.match(html, new RegExp(`data-quick-action="${action}"`));
+  }
+  assert.match(html, /data-nav="study"/);
+  assert.match(html, /data-nav="productivity"/);
+  assert.match(html, /data-nav="system"/);
+  assert.match(client, /getDisplayMedia/);
+  assert.match(client, /showHistory/);
+  assert.match(client, /searchAttachedFiles/);
+  assert.doesNotMatch(client, /setWorkspaceView\(['"]chat['"]\)|interface-switcher/);
+  assert.match(client, /toggleStudyMode/);
+  assert.match(client, /loadSystemMetrics/);
+  assert.match(html, /id="install-button"/);
+  assert.match(client, /setWorkspaceView\(state\.workspaceView, \{ remember: false \}\);[\s\S]*?initializeDeviceMonitor\(\)/);
+  assert.match(client, /import\('\/avatar3d\.bundle\.js\?avatar=7'\)/);
+  assert.doesNotMatch(client, /\bsetAvatarMouth\b|audioLipSync|avatarSpeechTimer/);
+  assert.match(client, /window\.speechSynthesis\.speak\(utterance\)/);
+  assert.match(client, /function startListeningFromUserGesture\(\) \{[\s\S]*?isGeminiLiveAvailable\(\)[\s\S]*?startLiveConversation\(\)[\s\S]*?startListening\('command', false, false, true\);[\s\S]*?\}/);
+  assert.match(client, /function startListening\(purpose = 'command', wakeHandoff = false, automaticWakeRestart = false, fromUserGesture = false\) \{[\s\S]*?if \(purpose === 'command' && 'speechSynthesis' in window\) stopSpeechOutput\(\);\s*if \(fromUserGesture\) primeVoiceOutput\(\);[\s\S]*?recognition\.start\(\)/);
+  assert.match(client, /monitorSpeechSynthesisStart\(window\.speechSynthesis/);
+  assert.match(client, /speechOutputTexts\.has\(speechText\)/);
+  const speakImplementation = client.match(/function speak\(text[^)]*\) \{([\s\S]*?)\n\}/)?.[1] || '';
+  const sendChatImplementation = client.match(/async function sendChat\(text,[\s\S]*?\n\}/)?.[0] || '';
+  assert.doesNotMatch(speakImplementation, /speechSynthesis\.cancel/);
+  assert.doesNotMatch(sendChatImplementation, /primeVoiceOutput/);
+  assert.match(client, /if \(event\.submitter === elements\.send && !command\) primeVoiceOutput\(\)/);
+  assert.match(html, /id="wake-word-enabled"/);
+  assert.match(client, /wakeWordEnabled: false/);
+  assert.match(client, /if \(state\.preferences\.wakeWordEnabled && !elements\.wakeWordEnabled\.disabled\) startListening\('wake'\)/);
+  assert.match(client, /recognition\.continuous = purpose === 'wake'/);
+  assert.match(client, /recognition\.maxAlternatives = purpose === 'wake' \? 3 : 1/);
+  assert.match(client, /recognition\.onstart = \(\) =>/);
+  assert.match(client, /readSpeechRecognitionAlternatives\(event\)[\s\S]*?find\(\(candidate\) => matchWakeWord\(candidate\)\.matched\)/);
+  assert.match(client, /readWakeWordCommand\(\s*wakeTranscript,\s*state\.wakeWordTriggered,\s*state\.wakeWordTriggered \? elements\.message\.value : ''/);
+  assert.match(client, /if \(wakeResult\.activated\)/);
+  assert.match(client, /No speech detected\. Restarting wake-word listening shortly\./);
+  assert.match(client, /if \(!wakeHandoff\) state\.wakeWordResumePending = false/);
+  assert.match(client, /startListening\('command', true\)/);
+  assert.match(client, /recognitionStartTimer = window\.setTimeout/);
+  assert.match(client, /document\.addEventListener\('visibilitychange'/);
+  assert.match(client, /window\.addEventListener\('blur', pauseVoiceForPageLifecycle\)/);
+  assert.match(client, /window\.addEventListener\('focus', resumeVoiceForPageLifecycle\)/);
+  assert.match(client, /window\.addEventListener\('pagehide', \(event\) => \{\s*pauseVoiceForPageLifecycle\(\);\s*if \(!event\.persisted\) portraitMotion\.destroy\(\);/);
+  assert.match(client, /window\.addEventListener\('pageshow'/);
+  assert.match(client, /function pageIsFocused\(\)/);
+  assert.match(client, /if \(!isPageForeground\(document\.visibilityState, focused\)\) \{\s*pauseVoiceForPageLifecycle\(\);\s*return;/);
+  assert.match(client, /status\.state === 'denied'[\s\S]*?requestStopListening\(state\.recognition, 'microphone-permission-denied'\)/);
+  assert.match(client, /if \(state\.assistantMode === 'listening'\) setAssistantState\('', 'SYSTEM STANDBY'\)/);
+  assert.match(client, /shouldRunWakeWord\(state\.preferences\.wakeWordEnabled, document\.visibilityState, state\.wakeWordPagePaused, state\.microphonePermission, pageIsFocused\(\)\)/);
+  assert.match(client, /shouldPlaySpeech\(document\.visibilityState, pageIsFocused\(\)\)/);
+  assert.match(client, /Voice playback stopped when J\.A\.R\.V\.I\.S\. lost focus/);
+  assert.match(client, /window\.speechSynthesis\?\.paused/);
+  assert.match(client, /if \(state\.recognitionWakeSession\) \{\s*state\.wakeWordResumePending = state\.preferences\.wakeWordEnabled;\s*requestStopListening\(state\.recognition, 'chat-submit'\);\s*\}/);
+  assert.match(client, /if \(wakeSession && wakeWasTriggered && state\.preferences\.wakeWordEnabled && !state\.pending[\s\S]*?isPageForeground\(document\.visibilityState, pageIsFocused\(\)\) && state\.microphonePermission !== 'denied'\)/);
+  assert.match(client, /const manualTakeoverPending = state\.wakeWordManualTakeoverPending;\s*state\.wakeWordManualTakeoverPending = false;\s*if \(manualTakeoverPending && !state\.preferences\.wakeWordEnabled && isPageForeground/);
+  assert.match(client, /dashboardCommandForm\.addEventListener\('submit'[\s\S]*?elements\.form\.requestSubmit\(\)/);
+  assert.match(client, /elements\.dashboardSend\.disabled = true/);
+  assert.match(client, /dashboardRetryButton\.addEventListener\('click', retryLastChat\)/);
+  assert.match(client, /function retryLastChat\(\)/);
+  assert.match(client, /setDashboardChatState\('thinking'/);
+  assert.match(client, /setAssistantState\('error'/);
+  assert.match(client, /elements\.message\.addEventListener\('keydown',[\s\S]*?event\.key === 'Enter' && !event\.shiftKey && !event\.isComposing[\s\S]*?elements\.form\.requestSubmit\(\)/);
+  assert.match(html, /id="ai-avatar" src="\/jarvis-portrait\.webp"/);
+  assert.match(html, /class="avatar-dev-settings"/);
+  assert.match(html, /class="avatar-model-controls"/);
+  assert.match(html, /id="avatar-canvas"/);
+  assert.doesNotMatch(html, /lip-sync/i);
+  assert.match(html, /class="portrait-head" aria-hidden="true"/);
+  assert.match(client, /avatarFrame\.dataset\.speaking = String\(detail\.speaking\)/);
+  assert.match(styles, /button:focus-visible, textarea:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible \{ outline: 2px solid/);
+  assert.match(client, /updateMetricGauge\(elements\.cpuMeterTrack, elements\.cpuMeter, metrics\.cpuUsagePercent\)/);
+  assert.match(client, /updateMetricGauge\(elements\.ramMeterTrack, elements\.ramMeter, metrics\.memoryPercent\)/);
+  assert.match(client, /updateMetricGauge\(elements\.diskMeterTrack, elements\.diskMeter, metrics\.diskPercent\)/);
+  assert.match(client, /function handleDashboardFeature/);
+  assert.match(client, /function updateHologramState\(\)/);
+  assert.match(client, /elements\.statePanelLive\.textContent = announcement\.toUpperCase\(\)/);
+  assert.match(client, /elements\.holoWaveform\.classList\.toggle\('is-active', voiceActive\)/);
+  assert.match(client, /state\.assistantMode = supportedModes\.includes\(mode\) \? mode : 'normal';[\s\S]*?updateHologramState\(\)/);
+  assert.match(client, /state\.holoOnline = true;\s*updateHologramState\(\)/);
+  assert.match(client, /state\.holoOnline = false;\s*updateHologramState\(\)/);
+  assert.match(client, /closest\('\[data-dashboard-feature\], \[data-avatar-feature\]'\)/);
+  assert.match(client, /destination === 'settings'[\s\S]*?openSettings\(\)/);
+  assert.match(client, /navigator\.permissions\.query\(\{ name: 'microphone' \}\)/);
+  assert.match(client, /navigator\.getBattery\(\)/);
+  assert.match(client, /performance\.memory/);
+  assert.match(client, /if \(profile\.isMobile\) updateBatteryStatus\(\);/);
+  assert.match(client, /async function loadSystemMetrics\(\) \{\s*try \{\s*const response = await fetch\('\/api\/system'/);
+  assert.match(client, /dashboardVoiceMicButton\.addEventListener\('click', \(\) => \{\s*startListeningFromUserGesture\(\);/);
+  assert.match(deviceMonitor, /export function detectDeviceProfile/);
+  assert.match(html, /Device details use browser-reported information/);
+  assert.match(styles, /body\.new-interface \.right-rail[\s\S]*overflow-y: auto/);
+  assert.match(html, /class="avatar-frame portrait-cutout-frame"/);
+  assert.match(html, /<canvas class="avatar-canvas" id="avatar-canvas"[^>]*><\/canvas>\s*<div class="holo-emitter"/);
+  assert.match(html, /<div class="avatar-frame portrait-cutout-frame"[^>]*>\s*<div class="portrait-artwork">\s*<img class="ai-avatar/);
+  assert.match(html, /id="ai-avatar" src="\/jarvis-portrait\.webp"/);
+  assert.doesNotMatch(html, /ai-avatar\.jpg/);
+  assert.match(html, /id="load-custom-avatar"/);
+  assert.match(html, /id="avatar-model-file"[^>]*accept="\.vrm,\.glb/);
+  assert.match(html, /id="activate-3d-avatar"/);
+  assert.match(html, /id="avatar-canvas"[^>]*hidden/);
+  assert.match(html, /News &amp; Briefing/);
+  assert.match(html, /data-nav="news" data-requires-full-access/);
+  assert.match(html, /id="install-help"/);
+  assert.match(client, /beforeinstallprompt/);
+  assert.match(client, /appinstalled/);
+  assert.match(client, /showInstallInstructions/);
+  assert.match(client, /Add to Home Screen/);
+  assert.match(worker, /jarvis-192\.png/);
+  assert.match(worker, /jarvis-512\.png/);
+  assert.match(styles, /@media \(max-width: 780px\)/);
+  assert.match(styles, /\.mobile-nav \{ position: fixed/);
+  const dashboardStyles = styles.slice(styles.indexOf(
+    'body.new-interface .main-frame {',
+    styles.indexOf('.app-hub-dialog-toolbar'),
+  ));
+  assert.match(dashboardStyles, /grid-template-columns: 190px minmax\(0, 1fr\)/);
+  assert.match(dashboardStyles, /grid-template-areas:[\s\S]*?"presence info"[\s\S]*?"status status"[\s\S]*?"command command"/);
+  assert.match(dashboardStyles, /grid-template-areas: "presence" "status" "command" "info"/);
+  assert.match(dashboardStyles, /body\.new-interface \.right-rail \{[^}]*display: flex/);
+  assert.match(dashboardStyles, /body\.new-interface \.mobile-nav \{ display: grid; \}/);
+  assert.match(dashboardStyles, /body\.new-interface \.new-feature-bar \{ display: none; \}/);
+  assert.match(dashboardStyles, /body\.new-interface \.holo-stage \{[\s\S]*?width: min\(100%, 590px, 60dvh\)/);
+  assert.match(dashboardStyles, /body\.new-interface \.avatar-frame \{[\s\S]*?width: 84%;[\s\S]*?height: 92%/);
+  assert.match(dashboardStyles, /body\.new-interface \.holo-sphere-shell \{[\s\S]*?width: 100%;[\s\S]*?height: 100%/);
+  assert.doesNotMatch(dashboardStyles, /orbit-three|holo-grid|core-halo|hud-build-tag/);
+  assert.match(dashboardStyles, /body\.new-interface \.dashboard-command \{[\s\S]*?grid-template-columns: 44px minmax\(0, 1fr\) 44px/);
+  assert.match(dashboardStyles, /body\.new-interface \.state-panel \.holo-state-strip \{[\s\S]*?grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
+  assert.match(styles, /@keyframes holo-wave/);
+  assert.match(styles, /\.holo-state\.is-current/);
+  assert.match(styles, /\.activity-log \{ min-height: 150px; flex: 1/);
+  assert.match(styles, /body\.new-interface \.presence \{[^}]*display: grid/);
+  assert.match(styles, /body\.new-interface \.ai-avatar \{[^}]*object-fit: cover;[^}]*filter: none;/);
+  assert.match(styles, /body\.new-interface \.holo-waveform\.is-active i/);
+  assert.match(styles, /body\.new-interface \.holo-emitter/);
+  assert.match(styles, /body\.new-interface \.state-panel \.holo-state-strip \{[^}]*grid-template-columns: repeat\(4, 58px\);[\s\S]*?justify-content: space-around;/);
+  assert.match(styles, /body\.new-interface \.state-panel \.holo-state \{[^}]*width: 58px;[\s\S]*?height: 58px;[\s\S]*?aspect-ratio: 1;[\s\S]*?border-radius: 50%;[\s\S]*?radial-gradient/);
+  assert.match(styles, /\.holo-stage\.is-globe-active > \.avatar-canvas \{[^}]*z-index: 2;[\s\S]*?transform: none;/);
+  assert.match(styles, /body\.new-interface \.holo-stage\.is-globe-active \.avatar-frame \.ai-avatar \{[^}]*object-fit: contain;[\s\S]*?-webkit-mask-image: none;[\s\S]*?mask-image: none;/);
+  assert.match(html, /<span class="holo-platform" aria-hidden="true"><\/span>/);
+  assert.match(styles, /body\.new-interface \.holo-stage\.is-globe-active \.avatar-frame \{[^}]*width: 90%;[\s\S]*?height: 70%;[\s\S]*?top: 34%;[\s\S]*?z-index: 5;/);
+  assert.match(styles, /body\.new-interface \.holo-stage\.is-globe-active \.holo-platform \{[^}]*width: 74%;[\s\S]*?height: 13%;[\s\S]*?bottom: 1%;[\s\S]*?left: 13%;[\s\S]*?radial-gradient[\s\S]*?rotateX\(68deg\)/);
+  assert.match(styles, /body\.new-interface \.holo-stage\.is-globe-active \.holo-emitter::before \{[^}]*width: 32%;[\s\S]*?height: 220%;[\s\S]*?var\(--avatar-holo-secondary\) 96%/);
+  assert.match(styles, /body\.new-interface \.holo-stage\.is-globe-active \.holo-emitter::after \{[^}]*display: none;/);
+  assert.match(styles, /@media \(max-width: 780px\)[\s\S]*?body\.new-interface \.holo-stage\.is-globe-active \{[^}]*width: min\(calc\(100vw - 28px\), 440px\)/);
+  assert.match(styles, /body\.new-interface \.dashboard-commandbar \{[\s\S]*?position: sticky/);
+  assert.match(styles, /body\.new-interface \.dashboard-commandbar \{[^}]*width: min\(100%, 720px\);[\s\S]*?min-height: 58px;/);
+  assert.match(styles, /body\.new-interface \.dashboard-command > \.dashboard-command-mic \{[^}]*width: 48px;[\s\S]*?height: 48px;/);
+  assert.match(styles, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(html, /styles\.css\?avatar=66/);
+  assert.match(html, /diagnostics\.js\?hud=28/);
+  assert.match(html, /id="runtime-diagnostics"/);
+  assert.match(html, /Temporary Android Speech Diagnostics/);
+  assert.match(diagnostics, /JavaScript errors:/);
+  assert.match(diagnostics, /get\('diagnostics'\) === '1'/);
+  assert.match(diagnostics, /HTTPS active:/);
+  assert.match(diagnostics, /SpeechRecognition:/);
+  assert.match(diagnostics, /webkitSpeechRecognition:/);
+  assert.match(diagnostics, /speechSynthesis:/);
+  assert.match(diagnostics, /TTS voices/);
+  assert.match(diagnostics, /Voice Output setting:/);
+  assert.match(diagnostics, /visibility=/);
+  assert.match(diagnostics, /Service-worker cache version:/);
+  assert.match(diagnostics, /jarvis:speech-diagnostic/);
+  assert.match(diagnostics, /query and fragment omitted/);
+  assert.match(diagnostics, /speech text is not recorded/);
+  assert.match(worker, /jarvis-shell-v103/);
+  assert.match(worker, /styles\.css\?avatar=66/);
+  assert.doesNotMatch(worker, /jarvis-portrait\.png/);
+  assert.match(worker, /reference-face\.jpg/);
+  assert.match(worker, /styles\.css\?avatar=66/);
+  assert.match(worker, /diagnostics\.js\?hud=28/);
+  assert.match(worker, /app\.js\?avatar=67/);
+  assert.match(worker, /jarvis-portrait-eyes-closed\.webp/);
+  assert.match(worker, /local-planner\.js/);
+  assert.match(worker, /smart-command-router\.js/);
+  assert.match(worker, /lab-personalize\.js/);
+  assert.match(worker, /lab-ai-modify\.js/);
+  assert.match(worker, /lab-code-studio\.js/);
+  assert.match(worker, /lab-extensions\.js/);
+  assert.match(worker, /lab-safety\.js/);
+  assert.match(worker, /JARVIS_DIAGNOSTICS/);
+  assert.doesNotMatch(worker, /ai-avatar\.jpg/);
+  assert.match(worker, /portrait-animation\.js/);
+  assert.match(worker, /portrait-motion\.js/);
+  assert.match(worker, /app-hub\.js/);
+  assert.match(worker, /search-summary\.js/);
+  assert.match(worker, /NETWORK_TIMEOUT_MS = 4_000/);
+  assert.match(worker, /response\.status >= 500 && cached/);
+  assert.ok(worker.includes("requestUrl.pathname.startsWith('/api/')"));
+  assert.match(worker, /share-link\.js/);
+  assert.match(worker, /device-monitor\.js/);
+  assert.doesNotMatch(worker, /interface-switcher\.js/);
+  assert.match(worker, /const response = await fetch\(event\.request, \{ signal: controller\.signal \}\)/);
+  assert.match(client, /service-worker\.js\?avatar=67/);
+  assert.match(client, /AI reply reaches speak\(\)/);
+  assert.match(client, /SpeechRecognition error/);
+  assert.match(client, /TTS utterance onstart/);
+  assert.match(client, /TTS utterance onerror/);
+  assert.match(client, /TTS utterance onend/);
+  assert.match(client, /createPortraitAnimation/);
+  assert.match(client, /PORTRAIT_ANIMATION_EVENT/);
+  assert.match(client, /avatarFrame\.dataset\.blink = detail\.blink/);
+  assert.match(client, /avatarFrame\.dataset\.viseme = detail\.viseme/);
+  assert.doesNotMatch(client, /location\.reload\(\)|jarvis:sw-reloaded/);
+  assert.match(client, /could not register its offline application cache/);
+  assert.match(client, /portraitAnimation\.startSpeech\(playbackId\)/);
+  assert.match(client, /portraitAnimation\.pauseSpeech\(playbackId\)/);
+  assert.match(client, /portraitAnimation\.resumeSpeech\(playbackId\)/);
+  assert.match(client, /portraitAnimation\.setViseme\(playbackId, viseme\)/);
+  assert.match(client, /state\.assistantMode !== 'speaking'/);
+  assert.match(client, /portraitAnimation\.finishSpeech\(playbackId\)/);
+  assert.match(client, /portraitAnimation\.cancelSpeech\(\)/);
+  assert.match(client, /AbortSignal\.timeout\(50_000\)/);
+  assert.match(client, /feature-toolbar, \.right-rail/);
+  assert.match(styles, /\.feature-toolbar \{ display: none; \}/);
+  assert.match(styles, /\.feature-toolbar \.toolbar-icon \{ width: 18px; height: 18px;/);
+  assert.match(styles, /\.mobile-nav button \{ min-width: 0; min-height: 44px;/);
+  assert.match(styles, /\.dashboard-command \{/);
+  assert.match(styles, /\.ai-avatar\.is-thinking/);
+  assert.match(styles, /@media \(max-width: 780px\)/);
+  assert.match(styles, /body\.new-interface \.presence \{[^}]*min-height: 0;[^}]*display: grid/);
+  assert.match(styles, /@media \(min-width: 781px\) and \(max-width: 1100px\)/);
+  const mobileNavigation = html.match(/<nav class="mobile-nav"[\s\S]*?<\/nav>/)?.[0] || '';
+  assert.equal([...mobileNavigation.matchAll(/<svg\b/g)].length, 6);
+  assert.deepEqual([...mobileNavigation.matchAll(/data-nav="([^"]+)"/g)].map((match) => match[1]), [
+    'dashboard', 'chat', 'voice', 'applications', 'more', 'lab',
+  ]);
+  assert.deepEqual([...mobileNavigation.matchAll(/<span>([^<]+)<\/span>/g)].map((match) => match[1]), [
+    'Home', 'Chat', 'Voice', 'Apps', 'More', 'LAB',
+  ]);
+  assert.match(styles, /\.new-feature-bar \{ display: none; \}/);
+  assert.match(styles, /grid-template-columns: repeat\(6, minmax\(0, 1fr\)\)/);
+  assert.match(styles, /\.mobile-nav button span \{ white-space: nowrap; \}/);
+  assert.match(html, /id="more-tools-button"/);
+  assert.doesNotMatch(client, /scheduleAvatarExpression|clearAvatarSpeech/);
+  assert.match(client, /utterance\.onstart = \(\) => \{\s*if \(playbackId !== state\.speechPlaybackId\) return;\s*startedAt = performance\.now\(\);\s*reportTtsDiagnostic\('TTS utterance onstart'/);
+  assert.match(client, /utterance\.onend = \(\) => \{\s*const endedAt = performance\.now\(\);\s*reportTtsDiagnostic\('TTS utterance onend', \{[\s\S]*?started: playbackStarted/);
+  assert.doesNotMatch(client.match(/utterance\.onend = \(\) => \{([\s\S]*?)\n  \};/)?.[1] || '', /markPlaybackStarted/);
+  assert.doesNotMatch(styles, /\.ai-avatar\.is-talking|@keyframes avatar-speech/);
+  assert.match(styles, /\.holo-stage\.is-speaking \.playback-indicator/);
+});
+
+test('caps the holographic Earth stage on short mobile landscape screens', async () => {
+  const styles = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
+  const shortScreenRule = /@media \(max-width: 780px\) and \(max-height: 520px\) \{\s*body\.new-interface \.holo-stage\.is-globe-active \{\s*width: min\(70vw, 300px, calc\(100vw - 28px\)\);/;
+
+  assert.match(styles, shortScreenRule);
+  assert.ok(styles.search(shortScreenRule) > styles.search(/@media \(max-width: 780px\) and \(max-height: 520px\) \{\s*body\.new-interface \.holo-stage \{/));
+});
+
+test('keeps mobile globe orbital overlays centered and within the stage width', async () => {
+  const styles = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
+
+  assert.match(styles, /body\.new-interface \.holo-stage\.is-globe-active \.orbit-one,\s*body\.new-interface \.holo-stage\.is-globe-active \.orbit-two \{\s*width: min\(90%, calc\(100vw - 32px\)\);\s*top: 50%;\s*left: 50%;\s*translate: -50% -50%;\s*\}/);
+});
+
+test('prevents horizontal page overflow for the mobile holographic Earth', async () => {
+  const styles = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
+
+  assert.match(styles, /@media \(max-width: 780px\) \{[\s\S]*?body\.new-interface \{ overflow-x: hidden; \}/);
+  assert.match(styles, /body\.new-interface \.holo-stage\.is-globe-active \{\s*width: min\(calc\(100vw - 28px\), 440px\);\s*max-width: 100%;[\s\S]*?margin: 0 auto;/);
+});
+
+test('opens only the Master Dashboard regardless of stale interface preferences', async () => {
+  const html = await (await fetch(baseUrl)).text();
+  const client = await (await fetch(`${baseUrl}/app.js`)).text();
+
+  assert.match(html, /<body class="new-interface">/);
+  assert.match(html, /<div class="dashboard-layout" id="dashboard-layout">/);
+  assert.match(html, /id="conversation-view"[^>]*hidden/);
+  assert.doesNotMatch(html, /interface-switcher|New Interface|Old Interface/);
+  assert.doesNotMatch(client, /jarvis\.interface\.mode|interface-switcher/);
+  assert.match(client, /workspaceView:\s*loadWorkspaceView\(\)/);
+});
+
+test('serves PWA metadata with the current dashboard theme', async () => {
+  const response = await fetch(`${baseUrl}/manifest.webmanifest`);
+  const manifest = await response.json();
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('cache-control'), /no-cache/);
+  assert.equal(manifest.display, 'standalone');
+  assert.equal(manifest.theme_color, '#050a17');
+  assert.ok(manifest.icons.some((icon) => icon.sizes === '192x192' && icon.type === 'image/png'));
+  assert.ok(manifest.icons.some((icon) => icon.sizes === '512x512' && icon.type === 'image/png' && icon.purpose === 'any'));
+  assert.ok(manifest.icons.some((icon) => icon.sizes === '512x512' && icon.purpose === 'maskable'));
+  assert.equal(manifest.start_url, '/');
+  assert.equal(manifest.scope, '/');
+});
+
+test('serves valid 192px and 512px PNG installation icons', async () => {
+  for (const size of [192, 512]) {
+    const response = await fetch(`${baseUrl}/icons/jarvis-${size}.png`);
+    const image = Buffer.from(await response.arrayBuffer());
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type'), /image\/png/);
+    assert.deepEqual([...image.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+    assert.equal(image.readUInt32BE(16), size);
+    assert.equal(image.readUInt32BE(20), size);
+  }
+});
+
+test('serves the transparent J.A.R.V.I.S. portrait as a local PNG asset', async () => {
+  const response = await fetch(`${baseUrl}/jarvis-portrait.png`);
+  const image = Buffer.from(await response.arrayBuffer());
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type'), /image\/png/);
+  assert.ok(image.length > 500_000);
+  assert.deepEqual([...image.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+  assert.equal(image.readUInt32BE(16), 1_199);
+  assert.equal(image.readUInt32BE(20), 1_312);
+  assert.equal(image[25], 6, 'the portrait PNG should retain its RGBA transparency');
+});
+
+test('serves and retains the bundled avatar face reference as a local JPEG asset', async () => {
+  const response = await fetch(`${baseUrl}/reference-face.jpg`);
+  const image = new Uint8Array(await response.arrayBuffer());
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type'), /image\/jpeg/);
+  assert.ok(image.length > 100_000);
+  assert.deepEqual([...image.slice(0, 3)], [0xff, 0xd8, 0xff]);
+});
+
+test('formats a private Codespaces HTTPS URL and handles non-Codespaces runs', () => {
+  assert.equal(
+    getForwardedUrl({ codespaceName: 'bright-jarvis', forwardingDomain: 'app.github.dev', port: 4173 }),
+    'https://bright-jarvis-4173.app.github.dev',
+  );
+  assert.equal(getForwardedUrl({ forwardingDomain: 'app.github.dev' }), null);
+});
+
+test('keeps Codespaces port 4173 private in both workspace configurations', async () => {
+  const [devcontainer, workspaceSettings] = await Promise.all([
+    readFile(new URL('../.devcontainer/devcontainer.json', import.meta.url), 'utf8'),
+    readFile(new URL('../.vscode/settings.json', import.meta.url), 'utf8'),
+  ]);
+  assert.equal(JSON.parse(devcontainer).portsAttributes['4173'].visibility, 'private');
+  assert.equal(JSON.parse(workspaceSettings)['remote.portsAttributes']['4173'].visibility, 'private');
+});
+
+test('selects the requested local Ollama model without adding credentials', () => {
+  const configured = getServerEnvironment({}, ['--ollama']);
+  assert.equal(configured.AI_PROVIDER, 'ollama');
+  assert.equal(configured.OLLAMA_BASE_URL, 'http://127.0.0.1:11434');
+  assert.equal(configured.OLLAMA_MODEL, 'qwen2.5:3b');
+  assert.equal('AI_API_KEY' in configured, false);
+});
+
+test('reports provider and access configuration without exposing credentials', async () => {
+  const response = await fetch(`${baseUrl}/api/health`);
+  const health = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.equal(health.aiConfigured, false);
+  assert.equal(health.providerSource, 'none');
+  assert.equal(health.aiAvailable, false);
+  assert.equal(health.ollamaAvailable, null);
+  assert.equal(health.accessRequired, false);
+  assert.equal(health.accessConfigured, false);
+  assert.equal(health.search, 'DuckDuckGo Instant Answers with Wikipedia search fallback');
+});
+
+test('serves Home Assistant states only through authenticated, allowlisted read requests', async () => {
+  const environmentKeys = ['HOME_ASSISTANT_URL', 'HOME_ASSISTANT_TOKEN', 'HOME_ASSISTANT_ENTITIES', 'HOME_ASSISTANT_CONTROL_ENTITIES', 'APP_ACCESS_TOKEN'];
+  const previousEnvironment = new Map(environmentKeys.map((key) => [key, process.env[key]]));
+  const originalFetch = globalThis.fetch;
+  const token = 'server-only-home-assistant-token';
+  const upstreamRequests = [];
+  process.env.HOME_ASSISTANT_URL = 'http://homeassistant.local:8123';
+  process.env.HOME_ASSISTANT_TOKEN = token;
+  process.env.HOME_ASSISTANT_ENTITIES = 'light.office,sensor.room_temperature';
+  process.env.HOME_ASSISTANT_CONTROL_ENTITIES = 'light.office';
+  process.env.APP_ACCESS_TOKEN = 'session-access-key';
+  let officeState = 'on';
+  globalThis.fetch = async (url, options) => {
+    upstreamRequests.push({ url, options });
+    const requestUrl = new URL(url);
+    if (requestUrl.pathname === '/api/services/light/turn_off') {
+      officeState = 'off';
+      return new Response('[]');
+    }
+    const entityId = decodeURIComponent(requestUrl.pathname.split('/').at(-1));
+    return new Response(JSON.stringify({
+      entity_id: entityId,
+      state: entityId === 'light.office' ? officeState : '21.5',
+      attributes: { friendly_name: 'Office light' },
+    }));
+  };
+
+  try {
+    const unauthorized = await fetchViaLoopbackAddress(`${baseUrl}/api/home-assistant/entities`);
+    assert.equal(unauthorized.status, 401);
+    assert.equal(upstreamRequests.length, 0);
+
+    const response = await fetchViaLoopbackAddress(`${baseUrl}/api/home-assistant/entities`, {
+      headers: { authorization: 'Bearer session-access-key' },
+    });
+    const responseText = await response.text();
+    const body = JSON.parse(responseText);
+    assert.equal(response.status, 200);
+    assert.deepEqual(body.entities, [
+      { entityId: 'light.office', state: 'on', name: 'Office light', canControl: true },
+      { entityId: 'sensor.room_temperature', state: '21.5', name: 'Office light' },
+    ]);
+    assert.equal(upstreamRequests.length, 2);
+    assert.ok(upstreamRequests.every(({ options }) => options.headers.authorization === `Bearer ${token}`));
+    assert.doesNotMatch(responseText, new RegExp(token));
+    assert.doesNotMatch(JSON.stringify(body), new RegExp(token));
+
+    const beforeControls = upstreamRequests.length;
+    const invalidBody = await fetchViaLoopbackAddress(`${baseUrl}/api/home-assistant/control`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer session-access-key', 'content-type': 'application/json' },
+      body: 'null',
+    });
+    assert.equal(invalidBody.status, 400);
+    assert.equal(upstreamRequests.length, beforeControls);
+
+    const unconfirmed = await fetchViaLoopbackAddress(`${baseUrl}/api/home-assistant/control`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer session-access-key', 'content-type': 'application/json' },
+      body: JSON.stringify({ entityId: 'light.office', targetState: 'off', confirmed: false }),
+    });
+    assert.equal(unconfirmed.status, 400);
+    assert.equal(upstreamRequests.length, beforeControls);
+
+    const unapprovedEntity = await fetchViaLoopbackAddress(`${baseUrl}/api/home-assistant/control`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer session-access-key', 'content-type': 'application/json' },
+      body: JSON.stringify({ entityId: 'sensor.room_temperature', targetState: 'off', confirmed: true }),
+    });
+    assert.equal(unapprovedEntity.status, 403);
+    assert.equal(upstreamRequests.length, beforeControls);
+
+    const controlResponse = await fetchViaLoopbackAddress(`${baseUrl}/api/home-assistant/control`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer session-access-key', 'content-type': 'application/json' },
+      body: JSON.stringify({ entityId: 'light.office', targetState: 'off', confirmed: true }),
+    });
+    const controlResult = await controlResponse.json();
+    assert.equal(controlResponse.status, 200);
+    assert.deepEqual(controlResult.entity, { entityId: 'light.office', state: 'off', name: 'Office light', canControl: true });
+    const serviceRequest = upstreamRequests.find(({ url }) => new URL(url).pathname.startsWith('/api/services/'));
+    assert.equal(new URL(serviceRequest.url).pathname, '/api/services/light/turn_off');
+    assert.deepEqual(JSON.parse(serviceRequest.options.body), { entity_id: 'light.office' });
+    assert.doesNotMatch(JSON.stringify(controlResult), new RegExp(token));
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of previousEnvironment) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test('configures Gemini and reads text-part replies without exposing its key', async () => {
+  const keys = ['AI_API_KEY', 'AI_BASE_URL', 'AI_MODEL', 'AI_PROVIDER', 'OLLAMA_BASE_URL'];
+  const previousEnvironment = new Map(keys.map((key) => [key, process.env[key]]));
+  const apiKey = 'test-only-gemini-environment-secret';
+  const geminiBaseUrl = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+  const geminiModel = 'gemini-3.5-flash-lite';
+  process.env.AI_API_KEY = apiKey;
+  process.env.AI_BASE_URL = geminiBaseUrl;
+  process.env.AI_MODEL = geminiModel;
+  process.env.OLLAMA_BASE_URL = 'http://127.0.0.1:11434';
+  delete process.env.AI_PROVIDER;
+  try {
+    const response = await fetch(`${baseUrl}/api/health`);
+    const health = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(health.provider, 'openai-compatible');
+    assert.equal(health.providerSource, 'environment');
+    assert.equal(health.model, geminiModel);
+    assert.equal(health.baseUrl, geminiBaseUrl);
+    assert.doesNotMatch(JSON.stringify(health), new RegExp(apiKey));
+  } finally {
+    for (const [key, value] of previousEnvironment) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test('returns truthful server CPU, RAM, and disk metrics', async () => {
+  const response = await fetch(`${baseUrl}/api/system`);
+  const metrics = await response.json();
+  assert.equal(response.status, 200);
+  assert.match(metrics.source, /server|container/);
+  assert.ok(metrics.cpuUsagePercent === null || (metrics.cpuUsagePercent >= 0 && metrics.cpuUsagePercent <= 100));
+  assert.ok(metrics.cpuCount > 0);
+  assert.ok(metrics.memoryTotalBytes > 0);
+  assert.ok(metrics.diskTotalBytes > 0);
+  assert.ok(metrics.memoryPercent >= 0 && metrics.memoryPercent <= 100);
+  assert.ok(metrics.diskPercent >= 0 && metrics.diskPercent <= 100);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const nextResponse = await fetch(`${baseUrl}/api/system`);
+  const nextMetrics = await nextResponse.json();
+  assert.ok(Number.isFinite(nextMetrics.cpuUsagePercent));
+  assert.ok(nextMetrics.cpuUsagePercent >= 0 && nextMetrics.cpuUsagePercent <= 100);
+});
+
+test('rejects invalid chat payloads and reports a missing provider honestly', async () => {
+  const invalid = await fetch(`${baseUrl}/api/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ messages: [{ role: 'system', content: 'bad role' }] }),
+  });
+  assert.equal(invalid.status, 400);
+
+  const unavailable = await fetch(`${baseUrl}/api/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ messages: [{ role: 'user', content: 'hello' }] }),
+  });
+  assert.equal(unavailable.status, 503);
+  assert.deepEqual(await unavailable.json(), {
+    error: 'No AI provider is configured. Configure GEMINI_API_KEY or another provider on the server.',
+  });
+
+});
+
+test('rejects invalid, oversized, and over-dimension Vision images', async () => {
+  const invalidMime = await fetch(`${baseUrl}/api/vision`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ question: 'What is this?', image: 'data:image/png;base64,AAAA' }),
+  });
+  assert.equal(invalidMime.status, 400);
+
+  const oversizedDimensions = await fetch(`${baseUrl}/api/vision`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      question: 'What is this?',
+      image: `data:image/jpeg;base64,${makeVisionJpeg(1_920, 1_080).toString('base64')}`,
+    }),
+  });
+  assert.equal(oversizedDimensions.status, 400);
+  assert.match((await oversizedDimensions.json()).error, /1280 pixels/);
+
+  const oversizedImage = await fetch(`${baseUrl}/api/vision`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      question: 'What is this?',
+      image: `data:image/jpeg;base64,${Buffer.alloc(500 * 1024 + 1).toString('base64')}`,
+    }),
+  });
+  assert.equal(oversizedImage.status, 400);
+
+  const oversizedBody = await fetch(`${baseUrl}/api/vision`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ question: 'What is this?', image: `data:image/jpeg;base64,${'A'.repeat(700_100)}` }),
+  });
+  assert.equal(oversizedBody.status, 413);
+});
+
+test('sends one explicitly requested Vision image to the configured provider without returning credentials', async () => {
+  const previousEnvironment = new Map(
+    ['AI_API_KEY', 'AI_MODEL', 'AI_BASE_URL', 'AI_PROVIDER'].map((key) => [key, process.env[key]]),
+  );
+  const apiKey = 'test-only-vision-provider-secret';
+  process.env.AI_API_KEY = apiKey;
+  process.env.AI_MODEL = 'gemini-3.5-flash-lite';
+  process.env.AI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+  delete process.env.AI_PROVIDER;
+
+  const originalFetch = globalThis.fetch;
+  let upstreamRequest;
+  let upstreamAuthorization;
+  globalThis.fetch = async (input, options) => {
+    if (String(input) === 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions') {
+      upstreamRequest = JSON.parse(options.body);
+      upstreamAuthorization = options.headers.authorization;
+      assert.equal(options.signal.aborted, false);
+      return new Response(JSON.stringify({ choices: [{ message: { content: 'A settings window is open.' } }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return originalFetch(input, options);
+  };
+
+  try {
+    const image = `data:image/jpeg;base64,${makeVisionJpeg().toString('base64')}`;
+    const response = await fetchViaLoopbackAddress(`${baseUrl}/api/vision`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: 'openai-compatible', question: 'What is visible?', image }),
+    });
+    const result = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(result.reply, 'A settings window is open.');
+    assert.equal(result.provider, 'gemini-3.5-flash-lite');
+    assert.equal(upstreamAuthorization, `Bearer ${apiKey}`);
+    assert.equal(upstreamRequest.model, 'gemini-3.5-flash-lite');
+    assert.equal(upstreamRequest.max_tokens, 256);
+    assert.equal(upstreamRequest.messages.at(-1).content.length, 2);
+    assert.equal(upstreamRequest.messages.at(-1).content[0].text, 'What is visible?');
+    assert.equal(upstreamRequest.messages.at(-1).content[1].image_url.url, image);
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(apiKey));
+
+    for (let requestCount = 1; requestCount < 5; requestCount += 1) {
+      const allowed = await fetchViaLoopbackAddress(`${baseUrl}/api/vision`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ provider: 'openai-compatible', question: 'What is visible?', image }),
+      });
+      assert.equal(allowed.status, 200);
+      assert.equal((await allowed.json()).reply, 'A settings window is open.');
+    }
+
+    const limited = await fetchViaLoopbackAddress(`${baseUrl}/api/vision`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: 'openai-compatible', question: 'What is visible?', image }),
+    });
+    assert.equal(limited.status, 429);
+    assert.match((await limited.json()).error, /five requests per minute/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of previousEnvironment) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test('routes chat to Ollama and returns its actual response', async () => {
+  process.env.AI_PROVIDER = 'ollama';
+  process.env.AI_API_KEY = 'test-only-cloud-provider-secret';
+  process.env.OLLAMA_BASE_URL = 'http://127.0.0.1:11434';
+  process.env.OLLAMA_MODEL = 'qwen2.5:3b';
+  const originalFetch = globalThis.fetch;
+  let requestBody;
+  globalThis.fetch = async (input, options) => {
+    if (String(input) === 'http://127.0.0.1:11434/api/chat') {
+      requestBody = JSON.parse(options.body);
+      return new Response(JSON.stringify({ message: { content: 'Test response from local model.' } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return originalFetch(input, options);
+  };
+
+  try {
+    const response = await originalFetch(`${baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        messages: [
+          { role: 'user', content: 'My name is Ada.' },
+          { role: 'assistant', content: 'Nice to meet you, Ada.' },
+          { role: 'user', content: 'नमस्ते, मुझे आगे क्या सीखना चाहिए?' },
+        ],
+        language: 'hi',
+        mode: 'study',
+        max_tokens: 256,
+      }),
+    });
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(data.reply, 'Test response from local model.');
+    assert.equal(data.provider, 'Ollama / qwen2.5:3b');
+    assert.equal(requestBody.model, 'qwen2.5:3b');
+    assert.equal(requestBody.stream, false);
+    assert.deepEqual(requestBody.options, { num_predict: 256 });
+    assert.match(requestBody.messages[0].content, /Reply in Hindi naturally/);
+    assert.match(requestBody.messages[0].content, /use relevant conversation history/);
+    assert.ok(requestBody.messages.some((message) => message.content.includes('Study Mode')));
+    assert.deepEqual(requestBody.messages.slice(1), [
+      { role: 'user', content: 'My name is Ada.' },
+      { role: 'assistant', content: 'Nice to meet you, Ada.' },
+      { role: 'user', content: 'नमस्ते, मुझे आगे क्या सीखना चाहिए?' },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.AI_PROVIDER;
+    delete process.env.AI_API_KEY;
+    delete process.env.OLLAMA_BASE_URL;
+    delete process.env.OLLAMA_MODEL;
+  }
+});
+
+test('health distinguishes a reachable Ollama daemon from an installed model', async () => {
+  process.env.AI_PROVIDER = 'ollama';
+  process.env.OLLAMA_BASE_URL = 'http://127.0.0.1:11434';
+  process.env.OLLAMA_MODEL = 'qwen2.5:3b';
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, options) => {
+    if (String(input) === 'http://127.0.0.1:11434/api/tags') {
+      return new Response(JSON.stringify({ models: [{ name: 'qwen2.5:3b' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return originalFetch(input, options);
+  };
+  try {
+    const response = await originalFetch(`${baseUrl}/api/health`);
+    const health = await response.json();
+    assert.equal(health.aiConfigured, true);
+    assert.equal(health.aiAvailable, true);
+    assert.equal(health.ollamaAvailable, true);
+    assert.equal(health.modelInstalled, true);
+    assert.equal(health.model, 'qwen2.5:3b');
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.AI_PROVIDER;
+    delete process.env.OLLAMA_BASE_URL;
+    delete process.env.OLLAMA_MODEL;
+  }
+});
+
+test('reports a useful error when the configured local Ollama daemon is unreachable', async () => {
+  process.env.AI_PROVIDER = 'ollama';
+  process.env.OLLAMA_BASE_URL = 'http://127.0.0.1:11434';
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, options) => {
+    if (String(input) === 'http://127.0.0.1:11434/api/chat') throw new TypeError('connection refused');
+    return originalFetch(input, options);
+  };
+  try {
+    const response = await originalFetch(`${baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'hello' }] }),
+    });
+    assert.equal(response.status, 503);
+    assert.match((await response.json()).error, /Start Ollama at the configured local endpoint/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.AI_PROVIDER;
+    delete process.env.OLLAMA_BASE_URL;
+  }
+});
+
+test('configures a server-side OpenAI-compatible provider without returning its API key', async () => {
+  const localConfiguration = await fetch(`${baseUrl}/api/settings/ai`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ provider: 'ollama', model: 'qwen2.5:3b' }),
+  });
+  assert.deepEqual(await localConfiguration.json(), {
+    configured: true,
+    providerSource: 'session',
+    provider: 'ollama',
+    model: 'qwen2.5:3b',
+    baseUrl: 'http://127.0.0.1:11434',
+  });
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, options) => {
+    if (String(input) === 'http://127.0.0.1:11434/api/tags') {
+      return new Response(JSON.stringify({ models: [{ name: 'qwen2.5:3b' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return originalFetch(input, options);
+  };
+  try {
+    const localHealth = await originalFetch(`${baseUrl}/api/health`);
+    const localStatus = await localHealth.json();
+    assert.equal(localStatus.provider, 'ollama');
+    assert.equal(localStatus.providerSource, 'session');
+    assert.equal(localStatus.model, 'qwen2.5:3b');
+    assert.equal(localStatus.aiAvailable, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  await originalFetch(`${baseUrl}/api/settings/ai`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ provider: 'environment' }),
+  });
+
+  const apiKey = 'test-only-provider-secret';
+  const invalid = await fetch(`${baseUrl}/api/settings/ai`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ provider: 'openai-compatible', model: 'bad model', apiKey }),
+  });
+  assert.equal(invalid.status, 400);
+
+  const missingKey = await fetch(`${baseUrl}/api/settings/ai`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ provider: 'openai-compatible', model: 'gemini-3.8-flash' }),
+  });
+  assert.equal(missingKey.status, 400);
+  const missingKeyResult = await missingKey.json();
+  assert.match(missingKeyResult.error, /API key|AI_API_KEY/);
+  assert.doesNotMatch(JSON.stringify(missingKeyResult), /test-only-provider-secret/);
+
+  const invalidBaseUrl = await fetch(`${baseUrl}/api/settings/ai`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ provider: 'openai-compatible', model: 'gemini-3.8-flash', apiKey, baseUrl: 'javascript:alert(1)' }),
+  });
+  assert.equal(invalidBaseUrl.status, 400);
+
+  const geminiBaseUrl = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+  const configured = await fetch(`${baseUrl}/api/settings/ai`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ provider: 'openai-compatible', model: 'gemini-3.8-flash', apiKey, baseUrl: geminiBaseUrl }),
+  });
+  const configuration = await configured.json();
+  assert.equal(configured.status, 200);
+  assert.equal(configured.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(configuration, {
+    configured: true,
+    providerSource: 'session',
+    provider: 'openai-compatible',
+    model: 'gemini-3.8-flash',
+    baseUrl: geminiBaseUrl,
+  });
+  assert.doesNotMatch(JSON.stringify(configuration), new RegExp(apiKey));
+
+  const healthResponse = await fetch(`${baseUrl}/api/health`);
+  const health = await healthResponse.json();
+  assert.equal(healthResponse.headers.get('cache-control'), 'no-store');
+  assert.equal(health.aiConfigured, true);
+  assert.equal(health.providerSource, 'session');
+  assert.equal(health.provider, 'openai-compatible');
+  assert.equal(health.model, 'gemini-3.8-flash');
+  assert.equal(health.baseUrl, geminiBaseUrl);
+  assert.doesNotMatch(JSON.stringify(health), new RegExp(apiKey));
+
+  let providerAuthorization;
+  let providerRequest;
+  globalThis.fetch = async (input, options) => {
+    if (String(input) === 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions') {
+      providerAuthorization = options.headers.authorization;
+      providerRequest = JSON.parse(options.body);
+      return new Response(JSON.stringify({ choices: [{ message: { content: [
+        { type: 'text', text: 'Configured provider ' },
+        { type: 'text', text: 'reply.' },
+      ] } }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return originalFetch(input, options);
+  };
+  try {
+    const chatResponse = await originalFetch(`${baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        provider: 'openai-compatible',
+        mode: 'study',
+        messages: [{ role: 'user', content: 'hello' }],
+      }),
+    });
+    const chat = await chatResponse.json();
+    assert.equal(chatResponse.status, 200);
+    assert.equal(chat.reply, 'Configured provider reply.');
+    assert.equal(chat.provider, 'gemini-3.8-flash');
+    assert.equal(providerAuthorization, `Bearer ${apiKey}`);
+    assert.equal(providerRequest.model, 'gemini-3.8-flash');
+    assert.equal(providerRequest.reasoning_effort, 'low');
+    assert.equal(providerRequest.max_tokens, undefined);
+    assert.ok(providerRequest.messages[0].content.includes('Study Mode'));
+    assert.deepEqual(providerRequest.messages.at(-1), { role: 'user', content: 'hello' });
+    assert.doesNotMatch(JSON.stringify(chat), new RegExp(apiKey));
+
+    const summaryPrompt = 'Summarize retrieved search sources. Source [1]: Verified article title; URL: https://news.example/article.';
+    const summaryResponse = await originalFetch(`${baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        provider: 'openai-compatible',
+        singleAttempt: true,
+        messages: [{ role: 'user', content: summaryPrompt }],
+      }),
+    });
+    assert.equal(summaryResponse.status, 200);
+    assert.equal(providerRequest.model, 'gemini-3.8-flash');
+    assert.deepEqual(providerRequest.messages.at(-1), { role: 'user', content: summaryPrompt });
+  } finally {
+    globalThis.fetch = originalFetch;
+    await originalFetch(`${baseUrl}/api/settings/ai`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: 'environment' }),
+    });
+  }
+});
+
+test('reports rejected OpenAI-compatible provider keys without treating them as server access keys', async () => {
+  const apiKey = 'test-only-invalid-provider-secret';
+  const echoedToken = 'test-only-echoed-bearer-token';
+  await fetch(`${baseUrl}/api/settings/ai`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      provider: 'openai-compatible',
+      model: 'gemini-3.8-flash',
+      apiKey,
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+    }),
+  });
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    if (String(input) === 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions') {
+      return new Response(JSON.stringify({
+        error: {
+          code: 401,
+          status: 'UNAUTHENTICATED',
+          message: `API key ${apiKey} rejected. Authorization: Bearer ${echoedToken}`,
+        },
+      }), { status: 401 });
+    }
+    return originalFetch(input);
+  };
+  try {
+    const response = await originalFetch(`${baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'hello' }] }),
+    });
+    const result = await response.json();
+    assert.equal(response.status, 502);
+    assert.equal(result.code, 'UNAUTHENTICATED');
+    assert.match(result.error, /API key \[redacted\] rejected/i);
+    assert.match(result.error, /redacted credential/i);
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(apiKey));
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(echoedToken));
+  } finally {
+    globalThis.fetch = originalFetch;
+    await originalFetch(`${baseUrl}/api/settings/ai`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: 'environment' }),
+    });
+  }
+});
+
+test('rejects a provider selection mismatch before contacting the configured endpoint', async () => {
+  const originalFetchImplementation = globalThis.fetch;
+  const configured = await originalFetchImplementation(`${baseUrl}/api/settings/ai`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      provider: 'openai-compatible',
+      model: 'route-test-model',
+      apiKey: 'test-only-route-mismatch-key',
+      baseUrl: 'https://openai-compatible.invalid/v1/',
+    }),
+  });
+  assert.equal(configured.status, 200);
+
+  let upstreamCalls = 0;
+  globalThis.fetch = async (input, options) => {
+    if (String(input).startsWith('https://openai-compatible.invalid/')) upstreamCalls += 1;
+    if (String(input).startsWith('https://openai-compatible.invalid/')) {
+      return new Response(JSON.stringify({ choices: [{ message: { content: 'must not run' } }] }));
+    }
+    return originalFetchImplementation(input, options);
+  };
+  try {
+    const response = await originalFetchImplementation(`${baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        provider: 'gemini',
+        messages: [{ role: 'user', content: 'Do not route to the configured OpenAI-compatible provider.' }],
+      }),
+    });
+    const result = await response.json();
+    assert.equal(response.status, 409);
+    assert.equal(result.code, 'AI_PROVIDER_MISMATCH');
+    assert.match(result.error, /selected provider is gemini.*configured for openai-compatible/i);
+    assert.equal(upstreamCalls, 0);
+    assert.doesNotMatch(JSON.stringify(result), /test-only-route-mismatch-key/);
+  } finally {
+    globalThis.fetch = originalFetchImplementation;
+    await originalFetchImplementation(`${baseUrl}/api/settings/ai`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: 'environment' }),
+    });
+  }
+});
+
+test('returns sanitized Google upstream details for OpenAI-compatible 404 responses', async () => {
+  const apiKey = 'test-only-gemini-404-provider-secret';
+  const echoedToken = 'test-only-google-error-bearer-secret';
+  const previousEnvironment = new Map(
+    ['AI_API_KEY', 'AI_MODEL', 'AI_BASE_URL'].map((key) => [key, process.env[key]]),
+  );
+  process.env.AI_API_KEY = apiKey;
+  process.env.AI_MODEL = 'gemini-3.8-flash';
+  process.env.AI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    if (String(input) === 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions') {
+      return new Response(JSON.stringify({
+        error: {
+          code: 404,
+          status: 'NOT_FOUND',
+          message: `Model not found for API version v1beta. API key=${apiKey}; Authorization: Bearer ${echoedToken}`,
+          details: [{ sensitiveDebugField: 'test-only-sensitive-response-field' }],
+        },
+      }), { status: 404, headers: { 'content-type': 'application/json' } });
+    }
+    return originalFetch(input);
+  };
+  try {
+    const response = await originalFetch(`${baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'hello' }] }),
+    });
+    const result = await response.json();
+    assert.equal(response.status, 502);
+    assert.equal(result.code, 'NOT_FOUND');
+    assert.match(result.error, /Model not found for API version v1beta/i);
+    assert.match(result.error, /verify that this model is enabled for your key/i);
+    assert.equal(result.diagnostics.contentType, 'application/json');
+    const details = JSON.parse(result.diagnostics.body);
+    assert.equal(details.code, 'NOT_FOUND');
+    assert.match(details.message, /Model not found for API version v1beta/i);
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(apiKey));
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(echoedToken));
+    assert.doesNotMatch(JSON.stringify(result), /test-only-sensitive-response-field|sensitiveDebugField/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of previousEnvironment) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test('explains missing upstream error messages without exposing response details', async () => {
+  const previousEnvironment = new Map(
+    ['AI_API_KEY', 'AI_MODEL', 'AI_BASE_URL'].map((key) => [key, process.env[key]]),
+  );
+  process.env.AI_API_KEY = 'test-only-gemini-missing-message-secret';
+  process.env.AI_MODEL = 'gemini-3.8-flash';
+  process.env.AI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    if (String(input) === 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions') {
+      return new Response(JSON.stringify({
+        error: {
+          code: 404,
+          status: 'NOT_FOUND',
+          details: [{ privateDiagnostic: 'test-only-private-response-value' }],
+        },
+      }), { status: 404, headers: { 'content-type': 'application/json' } });
+    }
+    return originalFetch(input);
+  };
+  try {
+    const response = await originalFetch(`${baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'hello' }] }),
+    });
+    const result = await response.json();
+    assert.equal(response.status, 502);
+    assert.equal(result.code, 'NOT_FOUND');
+    assert.match(result.error, /response was JSON object with structured error and contained no usable error message/i);
+    assert.doesNotMatch(JSON.stringify(result), /privateDiagnostic|test-only-private-response-value/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of previousEnvironment) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test('does not append chat completions twice when the configured base URL already includes the endpoint', async () => {
+  const baseUrlWithEndpoint = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
+  const configured = await fetch(`${baseUrl}/api/settings/ai`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      provider: 'openai-compatible',
+      model: 'gemini-3.8-flash',
+      apiKey: 'test-only-provider-secret',
+      baseUrl: baseUrlWithEndpoint,
+    }),
+  });
+  assert.equal(configured.status, 200);
+
+  const originalFetch = globalThis.fetch;
+  let upstreamUrl;
+  globalThis.fetch = async (input) => {
+    if (String(input).startsWith('https://generativelanguage.googleapis.com/v1beta/openai/')) {
+      upstreamUrl = String(input);
+      return new Response(JSON.stringify({ choices: [{ message: { content: 'Endpoint verified.' } }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return originalFetch(input);
+  };
+  try {
+    const response = await originalFetch(`${baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'hello' }] }),
+    });
+    assert.equal(response.status, 200);
+    assert.equal(upstreamUrl, baseUrlWithEndpoint);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await originalFetch(`${baseUrl}/api/settings/ai`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: 'environment' }),
+    });
+  }
+});
+
+test('rejects oversized request bodies', async () => {
+  const response = await fetch(`${baseUrl}/api/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ messages: [{ role: 'user', content: 'x'.repeat(24_100) }] }),
+  });
+  assert.equal(response.status, 413);
+});
+
+test('requires the configured server access token for chat and search', async () => {
+  process.env.APP_ACCESS_TOKEN = 'unit-test-access-token';
+  const chatRequest = {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ messages: [{ role: 'user', content: 'hello' }] }),
+  };
+  const missing = await fetch(`${baseUrl}/api/chat`, chatRequest);
+  assert.equal(missing.status, 401);
+  const missingVision = await fetch(`${baseUrl}/api/vision`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ question: 'What is visible?', image: 'data:image/jpeg;base64,AAAA' }),
+  });
+  assert.equal(missingVision.status, 401);
+  const protectedSettings = await fetch(`${baseUrl}/api/settings/ai`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ provider: 'ollama', model: 'qwen2.5:3b' }),
+  });
+  assert.equal(protectedSettings.status, 401);
+  const wrong = await fetch(`${baseUrl}/api/search?q=test`, { headers: { authorization: 'Bearer wrong-token' } });
+  assert.equal(wrong.status, 401);
+  const protectedMetrics = await fetch(`${baseUrl}/api/system`);
+  assert.equal(protectedMetrics.status, 401);
+  const valid = await fetch(`${baseUrl}/api/chat`, {
+    ...chatRequest,
+    headers: { ...chatRequest.headers, authorization: 'Bearer unit-test-access-token' },
+  });
+  assert.equal(valid.status, 503);
+  delete process.env.APP_ACCESS_TOKEN;
+});
+
+test('fails closed in production when an access token has not been configured', async () => {
+  process.env.NODE_ENV = 'production';
+  const health = await (await fetch(`${baseUrl}/api/health`)).json();
+  assert.equal(health.accessRequired, true);
+  assert.equal(health.accessConfigured, false);
+  const response = await fetch(`${baseUrl}/api/search?q=test`);
+  assert.equal(response.status, 503);
+  assert.match((await response.json()).error, /locked/);
+  delete process.env.NODE_ENV;
+});
+
+test('validates search queries before contacting the search provider', async () => {
+  const empty = await fetchViaLoopbackAddress(`${baseUrl}/api/search?q=`, {}, '127.0.0.3');
+  assert.equal(empty.status, 400);
+  const tooLong = await fetchViaLoopbackAddress(`${baseUrl}/api/search?q=${'x'.repeat(201)}`, {}, '127.0.0.3');
+  assert.equal(tooLong.status, 400);
+  const unsupportedLanguage = await fetchViaLoopbackAddress(`${baseUrl}/api/search?q=test&lang=fr`, {}, '127.0.0.3');
+  assert.equal(unsupportedLanguage.status, 400);
+});
+
+test('returns DuckDuckGo instant answers when it provides source-backed results', async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedHosts = [];
+  globalThis.fetch = async (input) => {
+    requestedHosts.push(new URL(String(input)).hostname);
+    return new Response(JSON.stringify({
+      AbstractText: 'A source-backed summary.',
+      AbstractURL: 'https://example.com/article',
+      Heading: 'Example article',
+      RelatedTopics: [],
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const response = await fetchViaLoopbackAddress(`${baseUrl}/api/search?q=example`, {}, '127.0.0.4');
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(data.source, 'DuckDuckGo Instant Answer');
+    assert.equal(data.results[0].url, 'https://example.com/article');
+    assert.deepEqual(requestedHosts, ['api.duckduckgo.com']);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('falls back to source-linked Wikipedia results in the selected language', async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedHosts = [];
+  globalThis.fetch = async (input) => {
+    const searchUrl = new URL(String(input));
+    requestedHosts.push(searchUrl.hostname);
+    if (searchUrl.hostname === 'api.duckduckgo.com') {
+      return new Response(JSON.stringify({ RelatedTopics: [] }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+    }
+    assert.equal(searchUrl.hostname, 'hi.wikipedia.org');
+    assert.equal(searchUrl.searchParams.get('gsrsearch'), 'भारत');
+    return new Response(JSON.stringify({
+      query: { pages: { 42: { pageid: 42, title: 'भारत', extract: 'भारत का परिचय।' } } },
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const response = await fetchViaLoopbackAddress(
+      `${baseUrl}/api/search?q=${encodeURIComponent('भारत')}&lang=hi`,
+      {},
+      '127.0.0.5',
+    );
+    const data = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(data.source, 'Wikipedia search (Hindi)');
+    assert.equal(data.results[0].title, 'भारत');
+    assert.equal(data.results[0].url, 'https://hi.wikipedia.org/wiki/%E0%A4%AD%E0%A4%BE%E0%A4%B0%E0%A4%A4');
+    assert.deepEqual(requestedHosts, ['api.duckduckgo.com', 'hi.wikipedia.org']);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('reports search provider outages instead of fabricating results', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new TypeError('network unavailable'); };
+  try {
+    const response = await fetchViaLoopbackAddress(`${baseUrl}/api/search?q=example`, {}, '127.0.0.6');
+    assert.equal(response.status, 502);
+    assert.match((await response.json()).error, /DuckDuckGo Instant Answers and Wikipedia search could not be reached/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('blocks paths that escape the public directory', async () => {
+  const response = await fetch(`${baseUrl}/..%2fserver.js`);
+  assert.equal(response.status, 403);
+});
+
+test('queues automatic AI speech without interrupting voice preview', async () => {
+  const client = await (await fetch(`${baseUrl}/app.js`)).text();
+  const speakImplementation = client.match(/function speak\(text[^)]*\) \{([\s\S]*?)\n\}/)?.[1] || '';
+  const sendChatStart = client.indexOf('async function sendChat(text, {');
+  const sendChatEnd = client.indexOf('\nfunction retryLastChat', sendChatStart);
+  const sendChatImplementation = client.slice(sendChatStart, sendChatEnd);
+  const primeVoiceOutputImplementation = client.match(/function primeVoiceOutput\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
+
+  assert.match(sendChatImplementation, /const reply = readChatReply\(data\)/);
+  assert.match(sendChatImplementation, /if \(state\.preferences\.voiceEnabled\) \{\s*speechReplayController\.track\(replyMessage\);\s*reportSpeechDiagnostic\('AI reply reaches speak\(\)', \{ voiceOutputEnabled: true \}\);\s*speak\(reply, \{/);
+  assert.doesNotMatch(sendChatImplementation, /primeVoiceOutput/);
+  assert.match(client, /function startListeningFromUserGesture\(\) \{[\s\S]*?isGeminiLiveAvailable\(\)[\s\S]*?startLiveConversation\(\)[\s\S]*?startListening\('command', false, false, true\);[\s\S]*?\}/);
+  assert.match(client, /function startListening\(purpose = 'command', wakeHandoff = false, automaticWakeRestart = false, fromUserGesture = false\) \{[\s\S]*?if \(purpose === 'command' && 'speechSynthesis' in window\) stopSpeechOutput\(\);\s*if \(fromUserGesture\) primeVoiceOutput\(\);[\s\S]*?recognition\.start\(\)/);
+  assert.match(client, /language: state\.preferences\.language === 'hi' \? 'hi-IN' : 'en-US'/);
+  assert.match(speakImplementation, /speechOutputTexts\.has\(speechText\)/);
+  assert.doesNotMatch(speakImplementation, /speechSynthesis\.cancel/);
+  assert.match(speakImplementation, /monitorSpeechSynthesisStart\(window\.speechSynthesis/);
+  assert.match(client, /replayButton\.textContent = 'Tap to Replay'/);
+  assert.match(client, /if \(!speechReplayController\.beginReplay\(message\)\) return;\s*speak\(message\.content, \{/);
+  assert.match(client, /onStart: \(\) => speechReplayController\.markStarted\(message\)/);
+  assert.match(client, /onNotStarted: \(\) => speechReplayController\.markNotStarted\(message\)/);
+  assert.match(client, /const pendingSpeechOptions = state\.pendingSpeechOptions;[\s\S]*?speak\(pendingSpeechText, pendingSpeechOptions \|\| \{\}\)/);
+  assert.match(client, /document\.querySelector\('#preview-voice'\)\.addEventListener\('click', \(\) => \{[\s\S]*?speak\(state\.preferences\.language/);
+  assert.match(client, /if \(state\.preferences\.wakeWordEnabled\) \{\s*state\.wakeWordManualTakeoverPending = false;\s*startListening\('wake', false, false, true\);/);
+  assert.doesNotMatch(primeVoiceOutputImplementation, /voiceOutputPrimed/);
+});
+
+test('discovers and tests active-provider models without exposing credentials', async () => {
+  const keys = ['AI_API_KEY', 'AI_BASE_URL', 'AI_MODEL', 'AI_PROVIDER', 'APP_ACCESS_TOKEN'];
+  const previous = new Map(keys.map((key) => [key, process.env[key]]));
+  const originalFetch = globalThis.fetch;
+  const token = 'test-only-model-manager-access';
+  const apiKey = 'test-only-model-manager-provider-key';
+  const providerBase = 'https://models.example.test/v1/';
+  const upstreamRequests = [];
+  let upstreamStatus = 200;
+  process.env.APP_ACCESS_TOKEN = token;
+
+  globalThis.fetch = async (input, options = {}) => {
+    if (String(input).startsWith(baseUrl)) return originalFetch(input, options);
+    if (String(input).startsWith(providerBase)) {
+      upstreamRequests.push({ url: String(input), options, body: options.body ? JSON.parse(options.body) : null });
+      if (upstreamStatus !== 200) {
+        return new Response(JSON.stringify({ error: { message: 'provider error' } }), { status: upstreamStatus });
+      }
+      if (new URL(input).pathname.endsWith('/models')) {
+        return Response.json({ data: [
+          { id: 'fast-model', owned_by: 'mock-provider', context_length: 8_192 },
+          { id: 'reasoning-model', owned_by: 'mock-provider', context_length: 65_536 },
+        ] });
+      }
+      return Response.json({ choices: [{ message: { content: 'OK' } }] });
+    }
+    throw new Error('Model manager attempted an unexpected upstream request.');
+  };
+
+  try {
+    const unauthorized = await fetchViaLoopbackAddress(`${baseUrl}/api/models`);
+    assert.equal(unauthorized.status, 401);
+    const unconfigured = await fetchViaLoopbackAddress(`${baseUrl}/api/models`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    assert.equal(unconfigured.status, 503);
+
+    const configured = await fetchViaLoopbackAddress(`${baseUrl}/api/settings/ai`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: 'openai-compatible', model: 'initial-model', baseUrl: providerBase, apiKey }),
+    });
+    assert.equal(configured.status, 200);
+
+    const discoveredResponse = await fetchViaLoopbackAddress(`${baseUrl}/api/models`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const discovered = await discoveredResponse.json();
+    assert.equal(discoveredResponse.status, 200);
+    assert.equal(discovered.status, 'Available');
+    assert.equal(new URL(upstreamRequests[0].url).pathname, '/v1/models');
+    assert.equal(upstreamRequests[0].options.headers.authorization, `Bearer ${apiKey}`);
+    assert.deepEqual(discovered.models.map(({ id, status, verified }) => ({ id, status, verified })), [
+      { id: 'fast-model', status: 'Untested', verified: false },
+      { id: 'reasoning-model', status: 'Untested', verified: false },
+    ]);
+    assert.doesNotMatch(JSON.stringify(discovered), new RegExp(apiKey));
+
+    const probeResponse = await fetchViaLoopbackAddress(`${baseUrl}/api/models/test`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'fast-model' }),
+    });
+    const probe = await probeResponse.json();
+    const probeRequest = upstreamRequests.at(-1);
+    assert.equal(probeResponse.status, 200);
+    assert.equal(new URL(probeRequest.url).pathname, '/v1/chat/completions');
+    assert.equal(probeRequest.body.model, 'fast-model');
+    assert.ok(probeRequest.body.max_tokens <= 8);
+    assert.ok(probeRequest.options.signal instanceof AbortSignal);
+    assert.equal(probe.status, 'Available');
+    assert.equal(probe.verified, true);
+    assert.ok(Number.isFinite(probe.latencyMs) && probe.latencyMs >= 0);
+    assert.deepEqual(probe.capabilities, ['text']);
+    assert.doesNotMatch(JSON.stringify(probe), new RegExp(apiKey));
+
+    upstreamStatus = 401;
+    const authentication = await (await fetchViaLoopbackAddress(`${baseUrl}/api/models`, {
+      headers: { authorization: `Bearer ${token}` },
+    })).json();
+    assert.equal(authentication.status, 'Authentication Required');
+    upstreamStatus = 429;
+    const rateLimited = await (await fetchViaLoopbackAddress(`${baseUrl}/api/models`, {
+      headers: { authorization: `Bearer ${token}` },
+    })).json();
+    assert.equal(rateLimited.status, 'Rate Limited');
+    upstreamStatus = 404;
+    const unsupported = await (await fetchViaLoopbackAddress(`${baseUrl}/api/models/test`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'missing-model' }),
+    })).json();
+    assert.equal(unsupported.status, 'Unsupported');
+
+    const selected = await fetchViaLoopbackAddress(`${baseUrl}/api/settings/ai/model`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: 'openai-compatible', model: 'reasoning-model' }),
+    });
+    const selectedConfig = await selected.json();
+    assert.equal(selected.status, 200);
+    assert.equal(selectedConfig.model, 'reasoning-model');
+    assert.doesNotMatch(JSON.stringify(selectedConfig), new RegExp(apiKey));
+  } finally {
+    globalThis.fetch = originalFetch;
+    await fetchViaLoopbackAddress(`${baseUrl}/api/settings/ai`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: 'environment' }),
+    });
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});

@@ -1,0 +1,626 @@
+/**
+ * Main application script for Gemini Live API Demo
+ * Handles UI interactions, media streaming, and communication with Gemini API
+ */
+
+// Global state
+const state = {
+  client: null,
+  audio: { streamer: null, player: null, isStreaming: false },
+  video: { streamer: null, isStreaming: false },
+  screen: { capture: null, isSharing: false },
+  lastInteractionStatus: "",
+};
+
+// DOM element cache
+const elements = {};
+
+// Initialize DOM references
+function initDOM() {
+  const ids = [
+    "model",
+    "systemInstructions",
+    "enableInputTranscription",
+    "enableOutputTranscription",
+    "enableGrounding",
+    "enableAlertTool",
+    "enableCssStyleTool",
+    "enableGetOrderTool",
+    "voiceSelect",
+    "enableThinking",
+    "thinkingLevelGroup",
+    "thinkingLevelSelect",
+    "enableDrawSvgTool",
+    "temperature",
+    "temperatureValue",
+    "disableActivityDetection",
+    "silenceDuration",
+    "prefixPadding",
+    "endSpeechSensitivity",
+    "startSpeechSensitivity",
+    "activityHandling",
+    "connectBtn",
+    "disconnectBtn",
+    "connectionStatus",
+    "startAudioBtn",
+    "startVideoBtn",
+    "startScreenBtn",
+    "videoPreview",
+    "micSelect",
+    "cameraSelect",
+    "volume",
+    "volumeValue",
+    "chatContainer",
+    "chatInput",
+    "sendBtn",
+    "clientContentInput",
+    "injectBtn",
+    "turnComplete",
+    "debugInfo",
+    "setupJsonSection",
+    "setupJsonDisplay",
+  ];
+
+  ids.forEach((id) => {
+    elements[id] = document.getElementById(id);
+  });
+}
+
+// Populate media device selectors
+async function populateMediaDevices() {
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+
+    // Clear existing options
+    elements.micSelect.innerHTML =
+      '<option value="">Default Microphone</option>';
+    elements.cameraSelect.innerHTML =
+      '<option value="">Default Camera</option>';
+
+    // Add audio input devices
+    devices
+      .filter((device) => device.kind === "audioinput")
+      .forEach((device) => {
+        const option = document.createElement("option");
+        option.value = device.deviceId;
+        option.textContent =
+          device.label || `Microphone ${device.deviceId.substr(0, 8)}`;
+        elements.micSelect.appendChild(option);
+      });
+
+    // Add video input devices
+    devices
+      .filter((device) => device.kind === "videoinput")
+      .forEach((device) => {
+        const option = document.createElement("option");
+        option.value = device.deviceId;
+        option.textContent =
+          device.label || `Camera ${device.deviceId.substr(0, 8)}`;
+        elements.cameraSelect.appendChild(option);
+      });
+  } catch (error) {
+    console.error("Error enumerating devices:", error);
+  }
+}
+
+// Create reusable message element
+function createMessage(text, className = "") {
+  const div = document.createElement("div");
+  div.textContent = text;
+  if (className) div.className = className;
+  return div;
+}
+
+// Format tool call/response payload for display
+function formatToolPayload(payload) {
+  if (payload === undefined || payload === null) return "";
+  let str = typeof payload === "string" ? payload : JSON.stringify(payload);
+  if (str.length > 500) {
+    str = str.substring(0, 500) + "...";
+  }
+  return str;
+}
+
+// Update status display
+function updateStatus(elementId, text) {
+  if (elements[elementId]) {
+    elements[elementId].textContent = text;
+  }
+}
+
+// Connect to Gemini
+async function connect() {
+  try {
+    updateStatus("connectionStatus", "Fetching ephemeral token...");
+
+    // Fetch token from backend
+    const response = await fetch("/api/token", { method: "POST" });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch token: ${response.statusText}`);
+    }
+    const { token } = await response.json();
+    const model = elements.model.value.trim() || "gemini-3.8-live";
+
+    updateStatus("connectionStatus", "Connecting...");
+
+    // Create GeminiLiveAPI instance
+    state.client = new GeminiLiveAPI(token, model);
+
+    // Configure settings
+    state.client.systemInstructions = elements.systemInstructions.value;
+    state.client.inputAudioTranscription =
+      elements.enableInputTranscription.checked;
+    state.client.outputAudioTranscription =
+      elements.enableOutputTranscription.checked;
+    state.client.googleGrounding = elements.enableGrounding.checked;
+    state.client.responseModalities = ["AUDIO"];
+    state.client.voiceName = elements.voiceSelect.value;
+    state.client.enableThinking = elements.enableThinking ? elements.enableThinking.checked : false;
+    state.client.thinkingLevel = state.client.enableThinking
+      ? (elements.thinkingLevelSelect?.value || "minimal")
+      : null;
+    state.client.temperature = parseFloat(elements.temperature.value);
+
+    // Set automatic activity detection configuration
+    state.client.automaticActivityDetection = {
+      disabled: elements.disableActivityDetection.checked,
+      silence_duration_ms: parseInt(elements.silenceDuration.value),
+      prefix_padding_ms: parseInt(elements.prefixPadding.value),
+      end_of_speech_sensitivity: elements.endSpeechSensitivity.value,
+      start_of_speech_sensitivity: elements.startSpeechSensitivity.value,
+    };
+
+    // Set activity handling
+    state.client.activityHandling = elements.activityHandling.value;
+
+    // Add custom tools only if Google grounding is disabled
+    const isGroundingEnabled = elements.enableGrounding.checked;
+
+    if (!isGroundingEnabled) {
+      // Add alert tool if enabled
+      if (elements.enableAlertTool.checked) {
+        const alertTool = new ShowAlertTool();
+        state.client.addFunction(alertTool);
+        console.log("✅ Alert tool enabled");
+      }
+
+      // Add CSS style tool if enabled
+      if (elements.enableCssStyleTool.checked) {
+        const cssStyleTool = new AddCSSStyleTool();
+        state.client.addFunction(cssStyleTool);
+        console.log("✅ CSS style tool enabled");
+      }
+
+      // Add get order tool if enabled
+      if (elements.enableGetOrderTool.checked) {
+        const getOrderTool = new GetOrderTool();
+        state.client.addFunction(getOrderTool);
+        console.log("✅ Get order tool enabled");
+      }
+
+      // Add draw SVG tool if enabled
+      if (elements.enableDrawSvgTool.checked) {
+        const drawSvgTool = new DrawSVGTool();
+        state.client.addFunction(drawSvgTool);
+        console.log("✅ Draw SVG tool enabled");
+      }
+    } else {
+      console.log(
+        "⚠️ Custom tools disabled due to Google grounding being enabled"
+      );
+    }
+
+    // Set callbacks
+    state.client.onReceiveResponse = handleMessage;
+    state.client.onError = handleError;
+    state.client.onOpen = handleOpen;
+    state.client.onClose = handleClose;
+
+    await state.client.connect();
+
+    // Initialize media handlers
+    state.audio.streamer = new AudioStreamer(state.client);
+    state.video.streamer = new VideoStreamer(state.client);
+    state.screen.capture = new ScreenCapture(state.client);
+    state.audio.player = new AudioPlayer();
+    await state.audio.player.init();
+
+    updateStatus("debugInfo", "Connected successfully");
+  } catch (error) {
+    console.error("Connection failed:", error);
+    updateStatus("connectionStatus", "Connection failed: " + error.message);
+    updateStatus("debugInfo", "Error: " + error.message);
+  }
+}
+
+// Disconnect
+function disconnect() {
+  if (state.client && state.client.webSocket) {
+    state.client.webSocket.close();
+    state.client = null;
+  }
+
+  // Clean up audio streamer
+  if (state.audio.streamer) {
+    state.audio.streamer.destroy();
+    state.audio.streamer = null;
+  }
+  if (state.video.streamer) state.video.streamer.stop();
+  if (state.screen.capture) state.screen.capture.stop();
+
+  // Clean up audio player
+  if (state.audio.player) {
+    state.audio.player.destroy();
+    state.audio.player = null;
+  }
+
+  // Reset states
+  state.audio.isStreaming = false;
+  state.video.isStreaming = false;
+  state.screen.isSharing = false;
+
+  // Update UI
+  updateStatus("connectionStatus", "Disconnected");
+
+  elements.startAudioBtn.textContent = "Start Audio";
+  elements.startVideoBtn.textContent = "Start Video";
+  elements.startScreenBtn.textContent = "Share Screen";
+
+  elements.videoPreview.hidden = true;
+  elements.videoPreview.srcObject = null;
+}
+
+// Handle messages
+function handleMessage(message) {
+  // Don't let high-frequency audio packets overwrite meaningful debug info
+  if (message.type !== MultimodalLiveResponseType.AUDIO) {
+    updateStatus("debugInfo", `Message: ${message.type}`);
+  }
+
+  switch (message.type) {
+    case MultimodalLiveResponseType.TEXT:
+      addMessage(message.data, "assistant");
+      break;
+
+    case MultimodalLiveResponseType.AUDIO:
+      if (state.audio.player) {
+        state.audio.player.play(message.data);
+      }
+      break;
+
+    case MultimodalLiveResponseType.INPUT_TRANSCRIPTION:
+      console.log("Input transcription:", message.data);
+      if (!message.data.finished) {
+        addMessage(message.data.text, "user-transcript", (append = true));
+      }
+      break;
+
+    case MultimodalLiveResponseType.OUTPUT_TRANSCRIPTION:
+      console.log("Output transcription:", message.data);
+      if (!message.data.finished) {
+        addMessage(message.data.text, "assistant", (append = true));
+      }
+      break;
+
+    case MultimodalLiveResponseType.SETUP_COMPLETE:
+      console.log("Setup complete:", message.data);
+      addMessage("Ready!", "system");
+
+      // Display the setup JSON
+      if (state.client && state.client.lastSetupMessage) {
+        elements.setupJsonDisplay.textContent = JSON.stringify(
+          state.client.lastSetupMessage,
+          null,
+          2
+        );
+        elements.setupJsonSection.style.display = "block";
+      }
+      break;
+
+    case MultimodalLiveResponseType.TOOL_CALL:
+      console.log("🛠️ Tool call received: ", message.data);
+      const functionCalls = message.data.functionCalls;
+
+      // Fan out all function calls concurrently (non-blocking — async tools
+      // like get_order run in parallel and don't stall each other or the UI)
+      Promise.all(
+        functionCalls.map(async (functionCall) => {
+          const { name: functionName, id: functionCallId, args: parameters } = functionCall;
+          console.log(
+            `Calling function ${functionName} with parameters: ${JSON.stringify(parameters)}`
+          );
+
+          // Visualize tool call in chat
+          addMessage(`${functionName}(${formatToolPayload(parameters)})`, "tool-call");
+
+          // Check if this tool is declared as NON_BLOCKING
+          const toolDef = state.client.functionsMap[functionName];
+          const isNonBlocking = toolDef && toolDef.behavior === "NON_BLOCKING";
+
+          try {
+            const result = await state.client.callFunction(functionName, parameters);
+            const response = { result: result ?? "ok" };
+
+            // Visualize tool response in chat
+            addMessage(`${functionName} ➔ ${formatToolPayload(result ?? "ok")}`, "tool-response");
+
+            // NON_BLOCKING tools require a scheduling hint so the model knows
+            // how to handle the async result: INTERRUPT | WHEN_IDLE | SILENT
+            if (isNonBlocking) {
+              response.scheduling = toolDef.scheduling || "INTERRUPT";
+            }
+            return { id: functionCallId, name: functionName, response };
+          } catch (err) {
+            console.error(`Error calling function ${functionName}:`, err);
+            const response = { error: err.message };
+
+            // Visualize tool error response in chat
+            addMessage(`${functionName} ➔ Error: ${err.message}`, "tool-response");
+
+            if (isNonBlocking) {
+              response.scheduling = toolDef.scheduling || "INTERRUPT";
+            }
+            return { id: functionCallId, name: functionName, response };
+          }
+        })
+      ).then((functionResponses) => {
+        // Send all responses back once every call has settled
+        state.client.sendToolResponse(functionResponses);
+      });
+      break;
+
+    case MultimodalLiveResponseType.INTERACTION_STATUS:
+      console.log("Interaction status:", message.data);
+      state.lastInteractionStatus = message.data;
+      updateStatus("debugInfo", `Interaction status: ${message.data}`);
+      break;
+
+    case MultimodalLiveResponseType.TURN_COMPLETE:
+      console.log("Turn complete:", message.data);
+      const statusSuffix = state.lastInteractionStatus
+        ? ` | Interaction status: ${state.lastInteractionStatus}`
+        : "";
+      updateStatus("debugInfo", `Turn complete${statusSuffix}`);
+      break;
+
+    case MultimodalLiveResponseType.INTERRUPTED:
+      console.log("Interrupted");
+      addMessage("[Interrupted]", "system");
+      if (state.audio.player) state.audio.player.interrupt();
+      break;
+  }
+}
+
+// Connection handlers
+function handleOpen() {
+  updateStatus("connectionStatus", "Connected");
+}
+
+function handleClose() {
+  updateStatus("connectionStatus", "Disconnected");
+  disconnect();
+}
+
+function handleError(error) {
+  console.error("Error:", error);
+  updateStatus("connectionStatus", "Error: " + error);
+  updateStatus("debugInfo", "Error: " + error);
+}
+
+// Toggle audio
+async function toggleAudio() {
+  if (!state.audio.isStreaming) {
+    try {
+      // Initialize streamer if needed
+      if (!state.audio.streamer && state.client) {
+        state.audio.streamer = new AudioStreamer(state.client);
+      }
+
+      if (state.audio.streamer) {
+        // Get selected microphone device ID
+        const selectedMicId = elements.micSelect.value;
+        await state.audio.streamer.start(selectedMicId);
+        state.audio.isStreaming = true;
+        elements.startAudioBtn.textContent = "Stop Audio";
+        addMessage("[Microphone on]", "system");
+      } else {
+        addMessage("[Connect to Gemini first]", "system");
+      }
+    } catch (error) {
+      addMessage("[Audio error: " + error.message + "]", "system");
+    }
+  } else {
+    if (state.audio.streamer) state.audio.streamer.stop();
+    state.audio.isStreaming = false;
+    elements.startAudioBtn.textContent = "Start Audio";
+    addMessage("[Microphone off]", "system");
+  }
+}
+
+// Toggle video
+async function toggleVideo() {
+  if (!state.video.isStreaming) {
+    try {
+      // Initialize streamer if needed
+      if (!state.video.streamer && state.client) {
+        state.video.streamer = new VideoStreamer(state.client);
+      }
+
+      if (state.video.streamer) {
+        // Get selected camera device ID
+        const selectedCameraId = elements.cameraSelect.value;
+        const video = await state.video.streamer.start({
+          fps: 1,
+          width: 640,
+          height: 480,
+          deviceId: selectedCameraId || null,
+        });
+        state.video.isStreaming = true;
+
+        elements.videoPreview.srcObject = video.srcObject;
+        elements.videoPreview.hidden = false;
+        elements.startVideoBtn.textContent = "Stop Video";
+        addMessage("[Camera on]", "system");
+      } else {
+        addMessage("[Connect to Gemini first]", "system");
+      }
+    } catch (error) {
+      addMessage("[Video error: " + error.message + "]", "system");
+    }
+  } else {
+    if (state.video.streamer) state.video.streamer.stop();
+    state.video.isStreaming = false;
+
+    elements.videoPreview.srcObject = null;
+    elements.videoPreview.hidden = true;
+    elements.startVideoBtn.textContent = "Start Video";
+    addMessage("[Camera off]", "system");
+  }
+}
+
+// Toggle screen
+async function toggleScreen() {
+  if (!state.screen.isSharing) {
+    try {
+      // Initialize capture if needed
+      if (!state.screen.capture && state.client) {
+        state.screen.capture = new ScreenCapture(state.client);
+      }
+
+      if (state.screen.capture) {
+        const video = await state.screen.capture.start({ fps: 0.5 });
+        state.screen.isSharing = true;
+
+        // Show screen preview in the same video element
+        elements.videoPreview.srcObject = video.srcObject;
+        elements.videoPreview.hidden = false;
+        elements.startScreenBtn.textContent = "Stop Sharing";
+        addMessage("[Screen sharing on]", "system");
+      } else {
+        addMessage("[Connect to Gemini first]", "system");
+      }
+    } catch (error) {
+      addMessage("[Screen share error: " + error.message + "]", "system");
+    }
+  } else {
+    if (state.screen.capture) state.screen.capture.stop();
+    state.screen.isSharing = false;
+
+    // Hide preview if not using camera
+    if (!state.video.isStreaming) {
+      elements.videoPreview.srcObject = null;
+      elements.videoPreview.hidden = true;
+    }
+
+    elements.startScreenBtn.textContent = "Share Screen";
+    addMessage("[Screen sharing off]", "system");
+  }
+}
+
+function sendMessage() {
+  const message = elements.chatInput.value.trim();
+  if (!message) return;
+
+  if (state.client) {
+    addMessage(message, "user");
+    state.client.sendTextMessage(message);
+    elements.chatInput.value = "";
+  } else {
+    addMessage("[Connect to Gemini first]", "system");
+  }
+}
+
+// Inject client content into model history
+function injectClientContent() {
+  const message = elements.clientContentInput.value.trim();
+  if (!message) return;
+
+  if (state.client) {
+    addMessage("[Injected Client Content]: " + message, "user");
+    const turnComplete = elements.turnComplete.checked;
+    state.client.sendClientContentMessage(message, turnComplete);
+    elements.clientContentInput.value = "";
+  } else {
+    addMessage("[Connect to Gemini first]", "system");
+  }
+}
+
+// Add message to chat
+function addMessage(text, type, append = false) {
+  // Hide welcome card when chat activity starts
+  const welcomeCard = elements.chatContainer.querySelector(".welcome-card");
+  if (welcomeCard && (type === "user" || type === "assistant" || type === "user-transcript")) {
+    welcomeCard.style.display = "none";
+  }
+
+  // Get all div children (messages)
+  const messages = elements.chatContainer.querySelectorAll("div:not(.welcome-card)");
+  const lastMessage = messages[messages.length - 1];
+
+  // Check if we should append to the last message
+  if (append && lastMessage && lastMessage.className === type) {
+    // Append to existing message of the same type
+    lastMessage.textContent += text;
+  } else {
+    // Create new message
+    const message = createMessage(text, type);
+    elements.chatContainer.appendChild(message);
+  }
+
+  elements.chatContainer.scrollTop = elements.chatContainer.scrollHeight;
+  if (elements.chatContainer.parentElement) {
+    elements.chatContainer.parentElement.scrollTop = elements.chatContainer.parentElement.scrollHeight;
+  }
+}
+
+// Update volume
+function updateVolume() {
+  const value = elements.volume.value;
+  const volume = value / 100;
+  if (state.audio.player) {
+    state.audio.player.setVolume(volume);
+  }
+  updateStatus("volumeValue", value + "%");
+}
+
+// Update temperature display
+function updateTemperature() {
+  const value = elements.temperature.value;
+  updateStatus("temperatureValue", value);
+}
+
+function initEventListeners() {
+  elements.connectBtn.addEventListener("click", connect);
+  elements.disconnectBtn.addEventListener("click", disconnect);
+  elements.startAudioBtn.addEventListener("click", toggleAudio);
+  elements.startVideoBtn.addEventListener("click", toggleVideo);
+  elements.startScreenBtn.addEventListener("click", toggleScreen);
+  elements.sendBtn.addEventListener("click", sendMessage);
+  elements.injectBtn.addEventListener("click", injectClientContent);
+  elements.volume.addEventListener("input", updateVolume);
+  elements.temperature.addEventListener("input", updateTemperature);
+
+  if (elements.enableThinking && elements.thinkingLevelGroup) {
+    elements.enableThinking.addEventListener("change", () => {
+      elements.thinkingLevelGroup.style.display = elements.enableThinking.checked
+        ? "block"
+        : "none";
+    });
+  }
+
+  elements.chatInput.addEventListener("keypress", (e) => {
+    if (e.key === "Enter") sendMessage();
+  });
+
+  elements.clientContentInput.addEventListener("keypress", (e) => {
+    if (e.key === "Enter") injectClientContent();
+  });
+}
+
+// Initialize
+window.addEventListener("DOMContentLoaded", () => {
+  initDOM();
+  initEventListeners();
+  populateMediaDevices();
+  updateStatus("debugInfo", "Application initialized");
+});

@@ -1,0 +1,95 @@
+{
+  "name": "jarvis-by-khan",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A cross-platform J.A.R.V.I.S. assistant with browser, PWA, and Windows desktop support.",
+  "type": "module",
+  "main": "desktop/main.js",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.js",
+    "desktop": "electron .",
+    "desktop:dist": "electron-builder --win nsis",
+    "predesktop": "npm run build:avatar",
+    "predesktop:dist": "npm run build:avatar",
+    "prestart": "npm run build:avatar",
+    "codespaces": "node scripts/codespaces.js",
+    "codespaces:ollama": "node scripts/codespaces.js --ollama",
+    "icons:generate": "node scripts/generate-pwa-icons.js",
+    "build": "npm run build:avatar",
+    "build:avatar": "esbuild public/avatar3d.js --bundle --format=esm --minify --legal-comments=inline --outfile=public/avatar3d.bundle.js",
+    "pretest": "npm run build:avatar",
+    "test": "node --test",
+    "test:browser": "playwright test",
+    "test:browser:desktop": "playwright test --project=desktop-chromium",
+    "test:browser:mobile": "playwright test --project=android-mobile",
+    "check": "npm run build:avatar && node --check server.js && node --check integrations/home-assistant.js && node --check integrations/google-workspace.js && node --check integrations/telegram.js && node --check integrations/facebook-messenger.js && node --check scripts/codespaces.js && node --check scripts/generate-pwa-icons.js && node --check scripts/prepare-tauri-frontend.mjs && node --check scripts/tauri-android-setup.mjs && node --check public/runtime-config.js && node --check public/local-tts.js && node --check desktop/main.js && node --check desktop/external-links.js && node --check desktop/ipc-validation.js && node --check desktop/computer-actions.js && node --check public/vision-stream.js && node --check public/memory-crypto.js && node --check desktop/preload.cjs && node --check public/app.js && node --check public/api-response.js && node --check public/app-hub.js && node --check public/search-summary.js && node --check voice/speech-input.js && node --check public/chat-context.js && node --check public/local-memory.js && node --check public/smart-command-router.js && node --check public/portrait-animation.js && node --check public/portrait-motion.js && node --check public/hologram-scene.js && node --check public/avatar-cues.js && node --check public/avatar3d.js && node --check public/device-monitor.js && node --check public/diagnostics.js && node --check public/service-worker.js && node --check public/security-permissions.js && node --check public/error-recovery.js && node --check public/task-verifier.js && node --check public/agent-planner.js && node --check public/agent-engine.js && node --check public/file-manager.js && node --check public/memory-engine.js && node --check public/voice-noise-control.js && node --check public/voice-interruption.js",
+    "start:omnivoice": "python voice/omnivoice-server/server.py",
+    "tauri:prepare": "node scripts/prepare-tauri-frontend.mjs",
+    "tauri": "npx --yes @tauri-apps/cli@2",
+    "tauri:dev": "npx --yes @tauri-apps/cli@2 dev",
+    "tauri:build": "npx --yes @tauri-apps/cli@2 build",
+    "tauri:android:init": "npx --yes @tauri-apps/cli@2 android init && node scripts/tauri-android-setup.mjs",
+    "tauri:android:build": "npx --yes @tauri-apps/cli@2 android build --apk"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "@pixiv/three-vrm": "^3.5.5",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "electron": "^45.0.0",
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2"
+  },
+  "overrides": {
+    "electron-builder": {
+      "app-builder-lib": {
+        "minimatch": "^11.0.1",
+        "@electron/universal": {
+          "minimatch": "^11.0.1"
+        }
+      }
+    }
+  },
+  "build": {
+    "appId": "com.jarvisbykhan.assistant",
+    "productName": "J.A.R.V.I.S.",
+    "asar": true,
+    "directories": {
+      "output": "dist-desktop"
+    },
+    "files": [
+      "desktop/main.js",
+      "desktop/external-links.js",
+      "desktop/ipc-validation.js",
+      "desktop/computer-actions.js",
+      "desktop/preload.cjs",
+      "server.js",
+      "public/**/*",
+      "voice/gemini-live.js",
+      "voice/live-audio-processor.js",
+      "voice/speech-input.js",
+      "integrations/**/*.js",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "src-tauri/icons/icon.ico",
+      "artifactName": "JARVIS-Setup-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "J.A.R.V.I.S.",
+      "uninstallDisplayName": "J.A.R.V.I.S.",
+      "installerIcon": "src-tauri/icons/icon.ico",
+      "uninstallerIcon": "src-tauri/icons/icon.ico",
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}
