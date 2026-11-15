@@ -2,6 +2,27 @@ import { getAllowedExternalUrl } from './external-links.js';
 
 const MAX_CLIPBOARD_TEXT_LENGTH = 20_000;
 
+export function getApprovedDesktopMediaPermission(requestingUrl, expectedOrigin, permission, mediaTypes) {
+  if (permission !== 'media'
+    || typeof requestingUrl !== 'string'
+    || !Array.isArray(mediaTypes)
+    || mediaTypes.length !== 1) {
+    return null;
+  }
+
+  let requestingOrigin;
+  try {
+    requestingOrigin = new URL(requestingUrl).origin;
+  } catch {
+    return null;
+  }
+
+  if (requestingOrigin !== expectedOrigin) return null;
+  if (mediaTypes[0] === 'audio') return 'microphone';
+  if (mediaTypes[0] === 'video') return 'camera';
+  return null;
+}
+
 export function isTrustedDesktopIpcEvent(event, expectedOrigin) {
   const frame = event?.senderFrame;
   if (!frame || frame !== event.sender?.mainFrame) return false;

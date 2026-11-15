@@ -2,7 +2,12 @@ import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, Notifi
 import { spawn } from 'node:child_process';
 import { createAppServer } from '../server.js';
 import { getAllowedExternalUrl } from './external-links.js';
-import { isTrustedDesktopIpcEvent, getApprovedClipboardText, getApprovedDesktopExternalUrl } from './ipc-validation.js';
+import {
+  isTrustedDesktopIpcEvent,
+  getApprovedClipboardText,
+  getApprovedDesktopExternalUrl,
+  getApprovedDesktopMediaPermission,
+} from './ipc-validation.js';
 import { createComputerActionRunner } from './computer-actions.js';
 import { fileURLToPath } from 'node:url';
 
@@ -109,22 +114,23 @@ if (!gotSingleInstanceLock) {
         }
       });
       session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
-        let requestingOrigin;
-        try {
-          requestingOrigin = new URL(details.requestingUrl || webContents.getURL()).origin;
-        } catch {
+        const mediaPermission = getApprovedDesktopMediaPermission(
+          details.requestingUrl || webContents.getURL(),
+          desktopOrigin,
+          permission,
+          details.mediaTypes,
+        );
+        if (!mediaPermission) {
           callback(false);
           return;
         }
-        if (requestingOrigin !== desktopOrigin || permission !== 'media'
-          || !details.mediaTypes?.includes('audio') || details.mediaTypes.includes('video')) {
-          callback(false);
-          return;
-        }
+        const isCameraPermission = mediaPermission === 'camera';
         dialog.showMessageBox({
           type: 'question',
-          title: 'Microphone access',
-          message: 'Allow J.A.R.V.I.S. to use the microphone for voice input?',
+          title: isCameraPermission ? 'Camera access' : 'Microphone access',
+          message: isCameraPermission
+            ? 'Allow J.A.R.V.I.S. to use the camera for a one-time visual capture?'
+            : 'Allow J.A.R.V.I.S. to use the microphone for voice input?',
           buttons: ['Allow', 'Deny'],
           defaultId: 1,
           cancelId: 1,

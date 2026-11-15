@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { getApprovedDesktopMediaPermission } from '../desktop/ipc-validation.js';
 
 const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const desktopMain = await readFile(new URL('../desktop/main.js', import.meta.url), 'utf8');
@@ -34,9 +35,9 @@ test('starts the existing server on loopback with isolated Electron web contents
   assert.match(desktopMain, /compatible browser, dialer, or messaging app/);
   assert.match(desktopMain, /Android intent links are not supported by this desktop shell/);
   assert.match(desktopMain, /setPermissionRequestHandler/);
-  assert.match(desktopMain, /permission !== 'media'/);
+  assert.match(desktopMain, /getApprovedDesktopMediaPermission/);
   assert.match(desktopMain, /buttons: \['Allow', 'Deny'\]/);
-  assert.match(desktopMain, /details\.mediaTypes\.includes\('video'\)/);
+  assert.match(desktopMain, /title: isCameraPermission \? 'Camera access' : 'Microphone access'/);
   assert.match(desktopMain, /setDisplayMediaRequestHandler/);
   assert.match(desktopMain, /desktopCapturer\.getSources/);
   assert.match(desktopMain, /Choose a screen or window to share/);
@@ -48,6 +49,20 @@ test('starts the existing server on loopback with isolated Electron web contents
   assert.doesNotMatch(preload, /GeminiApiKey|gemini-key|apiKey/);
   assert.match(preload, /navigator\.userActivation\?\.isActive/);
   assert.doesNotMatch(preload, /exposeInMainWorld\('jarvisDesktop',\s*ipcRenderer/);
+});
+
+test('allows only single camera or microphone requests from the exact desktop origin', () => {
+  const desktopOrigin = 'http://127.0.0.1:41823';
+
+  assert.equal(getApprovedDesktopMediaPermission(`${desktopOrigin}/`, desktopOrigin, 'media', ['video']), 'camera');
+  assert.equal(getApprovedDesktopMediaPermission(`${desktopOrigin}/`, desktopOrigin, 'media', ['audio']), 'microphone');
+  assert.equal(getApprovedDesktopMediaPermission('https://example.com/', desktopOrigin, 'media', ['video']), null);
+  assert.equal(getApprovedDesktopMediaPermission('http://127.0.0.1.evil:41823/', desktopOrigin, 'media', ['video']), null);
+  assert.equal(getApprovedDesktopMediaPermission('http://127.0.0.1:41824/', desktopOrigin, 'media', ['video']), null);
+  assert.equal(getApprovedDesktopMediaPermission(`${desktopOrigin}/`, desktopOrigin, 'geolocation', ['video']), null);
+  assert.equal(getApprovedDesktopMediaPermission(`${desktopOrigin}/`, desktopOrigin, 'media', ['audio', 'video']), null);
+  assert.equal(getApprovedDesktopMediaPermission(`${desktopOrigin}/`, desktopOrigin, 'media', ['unknown']), null);
+  assert.equal(getApprovedDesktopMediaPermission('not a URL', desktopOrigin, 'media', ['video']), null);
 });
 
 test('wires typed desktop actions through a trusted, native-confirmed IPC channel only', () => {
