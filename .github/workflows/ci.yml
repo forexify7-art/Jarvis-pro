@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    working-directory: JARVIS-IronMan
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -25,6 +29,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: JARVIS-IronMan/package-lock.json
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -57,7 +62,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-results
-          path: test-results/
+          path: JARVIS-IronMan/test-results/
           if-no-files-found: ignore
           retention-days: 7
 
@@ -73,6 +78,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: JARVIS-IronMan/package-lock.json
 
       - name: Install Node dependencies
         run: npm ci
@@ -84,6 +90,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: jarvis-windows-installer
-          path: dist-desktop/*.exe
+          path: JARVIS-IronMan/dist-desktop/*.exe
           if-no-files-found: error
           retention-days: 7
