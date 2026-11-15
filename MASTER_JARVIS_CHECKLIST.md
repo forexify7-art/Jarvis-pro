@@ -1,99 +1,130 @@
-# JARVIS Master Development Audit Checklist
+# JARVIS Master Project Checklist
 
-- **Audit date:** 2026-11-14
-- **Branch:** `task/jarvis-completion`
-- **Worktree:** `/workspaces/Jarvis-pro-task-jarvis-completion`
-- **Audited source:** `JARVIS-IronMan/` (449 project files)
+Audit snapshot: 2026-11-14
 
-## Status and priority key
+## Scope and scoring rules
 
-- **DONE** — implementation has direct automated test or static syntax evidence in this audit.
-- **PARTIAL** — code exists, but an important build, device, end-to-end, or live-verification gate is outstanding.
-- **PENDING** — not implemented, not integrated, or could not be verified in this environment.
-- **FAILED** — current code directly blocks an exposed feature.
-- **P0** — blocks safe source integration or CI; **P1** — high-priority build, security, or feature acceptance; **P2** — important product/verification gap; **P3** — follow-up.
+- Audited source: the local `JARVIS-IronMan` directory containing `package.json` under `Jarvis pro/Jarvis-complete--main/`. This source directory is currently untracked and has no nested `.git`.
+- The 55 IDs below are the deduplicated checklist for the documented current product scope and its explicit release/verification gates. A task represents one independently checkable behavior or acceptance gate. The same behavior mentioned in multiple reports, snapshots, or ZIP files is counted once.
+- `Completed` means the scoped code is implemented and its relevant automated test evidence passes. It does **not** mean live-service or target-device acceptance has passed. Those gates have separate IDs and a separate real-world status.
+- `Partial` means the scoped code is incomplete, the accepted feature is intentionally narrower than its catalog requirement, or evidence is incomplete. `Pending` means the implementation or acceptance gate is outstanding. `Failed` is reserved for a current reproducible failure; there were no such failures in the local test runs recorded below.
+- Percentages use unweighted task counts. Partial tasks receive no completion credit:
+  - Project checklist completion = `Completed / all 55 tasks`.
+  - Code completion = `Completed code tasks / 41 code tasks`.
+  - Real-world verification = `Verified / 11 tasks requiring live, device, or independent external acceptance`.
+- The percentages describe this checklist, not a claim that the product is production-ready. Unapproved or intentionally unsupported scope (arbitrary shell/mouse/keyboard control, interactive browser actions, inbound messaging/WhatsApp/SMS, and continuous semantic video understanding) is listed separately and is not silently added to the denominator.
+- Evidence paths in task rows are relative to the audited `JARVIS-IronMan` source directory. Passing mocked tests count as code evidence only.
 
-Dependencies below are actual prerequisites, not ordering suggestions. No source was staged or committed. No secrets, live providers, accounts, devices, deployments, or external integrations were used.
+## Consolidated task list
 
-## Audit evidence and limits
+| ID | Module / independently checkable task | Code status | Code and test evidence | Real-world verification |
+|---|---|---|---|---|
+| JARVIS-001 | App shell, primary navigation, and chat entry points | Completed | `public/index.html`, `public/app.js`; `test/app-hub.test.js`, `test/navigation-ui-regression.test.js` | Local browser E2E passed; target-device acceptance is not claimed |
+| JARVIS-002 | Responsive dashboard and mobile layouts | Completed | `test/dashboard-mobile-layout.test.js`; `browser-tests/app.spec.js` | Local desktop/emulated-mobile E2E passed |
+| JARVIS-003 | UI localization and navigation regressions | Completed | `public/ui-localization.js`; `test/ui-localization.test.js`, `test/navigation-ui-regression.test.js` | Not required for the code-only check |
+| JARVIS-004 | API error display, diagnostics, and recovery states | Completed | `public/api-response.js`, `public/error-recovery.js`; `test/api-response.test.js`, `test/ai-errors.test.js`, `test/diagnostics.test.js` | Not required for the code-only check |
+| JARVIS-005 | PWA service-worker cache and offline behavior | Partial | `public/service-worker.js`; `test/service-worker.test.js` passes, but full offline behavior across target browsers is not evidenced | Pending broader browser/device offline acceptance |
+| JARVIS-006 | 2D portrait asset layering and fallback display | Completed | `public/portrait-animation.js`; `test/portrait-animation.test.js`, `browser-tests/hero-rendering.spec.js` | Local visual E2E passed; physical display/device review is not claimed |
+| JARVIS-007 | 2D blink, mouth motion, and avatar cues | Completed | `public/portrait-motion.js`, `public/avatar-cues.js`; `test/portrait-motion.test.js`, `test/avatar3d.test.js` | Local browser visual tests passed |
+| JARVIS-008 | 3D avatar initialization and supported hero modes | Completed | `public/avatar3d.js`, `public/hologram-scene.js`; `test/avatar3d.test.js`, `browser-tests/hero-rendering.spec.js` | Target GPU/device acceptance is JARVIS-053 |
+| JARVIS-009 | WebGL failure, context-loss, and static fallback handling | Completed | `public/avatar3d.js`; `browser-tests/hero-rendering.spec.js` | Local Chromium E2E passed; target GPU acceptance is JARVIS-053 |
+| JARVIS-010 | Microphone permission state and start/stop lifecycle | Completed | `public/security-permissions.js`, `voice/speech-input.js`; `test/speech-input.test.js`, `test/desktop.test.js` | Physical permission/revocation QA is JARVIS-052 |
+| JARVIS-011 | Speech-recognition error recovery and bounded retries | Completed | `voice/speech-input.js`; `test/speech-input.test.js` | Physical browser/device voice QA is JARVIS-052 |
+| JARVIS-012 | Hindi/English recognition routing | Completed | `voice/speech-input.js`; `test/speech-input.test.js`, `test/files-memory-voice.test.js` | Per-device language acceptance is JARVIS-052 |
+| JARVIS-013 | Opt-in wake detection, foreground limits, and mute/stop behavior | Partial | `voice/speech-input.js`; speech lifecycle tests cover state/error behavior. Wake detection relies on browser speech recognition rather than a dedicated on-device wake-word engine | Physical-device behavior is JARVIS-052 |
+| JARVIS-014 | Local TTS and OmniVoice fallback/status handling | Completed | `public/local-tts.js`, `voice/omnivoice-server/server.py`; `test/local-tts.test.js`, `test/tts-server.test.js`, `test/omnivoice_server_test.py` | Real audio/device acceptance is JARVIS-052 |
+| JARVIS-015 | Speech interruption and stale-playback cancellation | Completed | `public/voice-interruption.js`, `voice/speech-input.js`; `test/files-memory-voice.test.js`, `test/speech-input.test.js` | Physical interruption latency is JARVIS-052 |
+| JARVIS-016 | Gemini Live server token/session lifecycle | Completed | `server.js`, `voice/gemini-live.js`; `test/gemini-live-server.test.js`, `test/gemini-live.test.js` | Live Gemini Live session is JARVIS-047 |
+| JARVIS-017 | Gemini provider chat and supported vision routing | Completed | `server.js`; `test/gemini-provider.test.js`, `test/openai-compatible-vision-routing.test.js` | Live provider verification is JARVIS-047 |
+| JARVIS-018 | OpenAI-compatible provider configuration and request routing | Completed | `server.js`, `public/runtime-config.js`; provider and vision-routing tests pass | Live provider verification is JARVIS-047 |
+| JARVIS-019 | Ollama local provider, model discovery, and request routing | Completed | `server.js`; `test/ollama-provider.test.js` | Local operator Ollama instance is not configured in this audit |
+| JARVIS-020 | Model discovery/probing and sanitized provider errors | Completed | `server.js`, `public/diagnostics.js`; `test/model-manager.test.js`, `test/ai-errors.test.js`, `test/server.test.js` | Live quota/model behavior is JARVIS-047 |
+| JARVIS-021 | Read-only Browser Research service, authorization, and result rendering | Completed | `browser/jarvis_browser_service.py`, `server.js`; `test/browser-research.test.js`, `test/browser_service_test.py`, `browser-tests/app.spec.js` | E2E used local/mocked routes; external browser egress is JARVIS-024 |
+| JARVIS-022 | Public-URL validation, DNS checks, and pinned browser resolution | Completed | `browser/jarvis_browser_service.py`; `test/browser_service_test.py` covers public/private DNS and resolver rules | Runtime redirect/subresource behavior is JARVIS-024 |
+| JARVIS-023 | Egress proxy blocks private HTTP requests and HTTPS CONNECT targets | Completed | `browser/jarvis_browser_service.py`; `test/browser_service_test.py` has mocked private-DNS, redirect/subresource, and CONNECT denial cases | Actual Chromium navigation/egress remains JARVIS-024 |
+| JARVIS-024 | Validate Browser Research redirects and subresource egress in a real browser/network boundary | Pending | Unit tests cover proxy denial, but do not prove every Chromium navigation/subresource path | Pending; no live destination or deployment was tested |
+| JARVIS-025 | Typed computer-action registry, allowlists, and confirmation | Completed | `desktop/computer-actions.js`; `test/computer-actions.test.js`, `test/desktop.test.js` | OS-specific smoke testing is JARVIS-042 |
+| JARVIS-026 | Computer-action cancellation, rate limits, and audit behavior | Completed | `desktop/computer-actions.js`; `test/computer-actions.test.js` | OS-specific smoke testing is JARVIS-042 |
+| JARVIS-027 | Electron IPC isolation, external links, and narrow clipboard bridge | Completed | `desktop/main.js`, `desktop/preload.cjs`, `desktop/ipc-validation.js`; `test/desktop-external-links.test.js`, `test/desktop.test.js` | Windows installer/IPC lifecycle is JARVIS-042 |
+| JARVIS-028 | File/ZIP path validation and bounded file operations | Completed | `public/file-manager.js`, `server.js`; `test/files-memory-voice.test.js`, `test/server.test.js` | Host-specific file-picker behavior is not separately verified |
+| JARVIS-029 | Explicit screen/camera still capture, permission handling, and stop cleanup | Completed | `public/vision-stream.js`; `test/vision-stream.test.js`, `test/vision-ui-regression.test.js` | Physical camera/microphone acceptance is JARVIS-052 |
+| JARVIS-030 | Bounded continuous frame-sampling controller | Completed | `public/vision-stream.js`; `test/vision-stream.test.js` covers limits, abort, and non-overlap | This does not establish continuous semantic video understanding; camera hardware acceptance is JARVIS-052 |
+| JARVIS-031 | Local memory CRUD and explicit context controls | Completed | `public/local-memory.js`, `public/memory-engine.js`; `test/local-memory.test.js`, `test/files-memory-voice.test.js` | No cloud sync is included in current scope |
+| JARVIS-032 | Encrypted memory export/import | Completed | `public/memory-crypto.js`; `test/memory-crypto.test.js`, `test/local-memory.test.js` | Multi-device recovery is not included in current scope |
+| JARVIS-033 | Planner approval, supported execution, verification, and cancellation | Partial | `public/agent-planner.js`, `public/agent-engine.js`; `test/agent-core.test.js`, `test/agent-ui.test.js`, `test/browser-agent.test.js` | Supported actions are intentionally bounded; full native/browser automation is not accepted scope |
+| JARVIS-034 | Google OAuth PKCE/state and encrypted server-side token lifecycle | Completed | `integrations/google-workspace.js`; `test/google-workspace.test.js`, `test/google-workspace-api.test.js` | Live consent/restart/disconnect is JARVIS-048 |
+| JARVIS-035 | Gmail draft creation with no send endpoint | Partial | `integrations/google-workspace.js`; `test/google-workspace.test.js`, `test/google-workspace-api.test.js` verify drafts. Sending is not implemented | Live OAuth is JARVIS-048; review the breadth of `gmail.compose` scope |
+| JARVIS-036 | Bounded Calendar reads and confirmed event creation | Partial | `integrations/google-workspace.js`; `test/google-workspace.test.js`, `test/google-workspace-api.test.js` | Live OAuth is JARVIS-048; update/cancel actions are absent |
+| JARVIS-037 | Home Assistant read allowlist and redacted entity data | Completed | `integrations/home-assistant.js`; `test/home-assistant.test.js` | Live instance verification is JARVIS-049 |
+| JARVIS-038 | Confirmed Home Assistant light/switch controls and state verification | Completed | `integrations/home-assistant.js`; `test/home-assistant.test.js` | Live device behavior is JARVIS-049 |
+| JARVIS-039 | Telegram outbound status/send with recipient allowlist and confirmation | Completed | `integrations/telegram.js`; `test/telegram.test.js`, `test/telegram-api.test.js`, `test/telegram-ui.test.js` | Live bot test is JARVIS-050 |
+| JARVIS-040 | Facebook Messenger outbound reply allowlist and confirmation | Completed | `integrations/facebook-messenger.js`; `test/facebook-messenger.test.js`, `test/facebook-messenger-api.test.js`, `test/facebook-messenger-ui.test.js` | Live Meta/Page test is JARVIS-051 |
+| JARVIS-041 | Windows installer configuration and CI build job | Completed | `package.json`, `.github/workflows/ci.yml`; `test/desktop.test.js`, `test/tauri-config.test.js` | Installer install/update/uninstall smoke test is JARVIS-042 |
+| JARVIS-042 | Build and smoke-test Windows installer lifecycle, IPC, and voice | Pending | Build job is configured; no Windows install/update/uninstall evidence in this audit | Pending; no Windows runner/device test was run |
+| JARVIS-043 | Android Tauri configuration and setup scripts | Partial | `src-tauri/tauri.conf.json`, `scripts/tauri-android-setup.mjs`; `test/tauri-config.test.js` | APK/device acceptance is JARVIS-044 |
+| JARVIS-044 | Build/install Android APK and verify lifecycle/microphone/camera permissions | Pending | Setup/config tests are not APK/device evidence | Pending; Android toolchain/device acceptance has not occurred |
+| JARVIS-045 | Refresh dependency audit and reconcile release evidence | Partial | CI workflow includes `npm audit`; an earlier source report states zero advisories, but `npm audit` was not rerun for this checklist | Pending fresh, authorized dependency-audit result |
+| JARVIS-046 | Independent security review before production exposure | Pending | `SECURITY_AUDIT.md` is a source/test review, not an external penetration test | Pending |
+| JARVIS-047 | Live AI provider and Gemini Live acceptance | Pending | Mocked provider/session tests exist; no live credentials or provider requests were used | Pending; operator-owned authorized test service required |
+| JARVIS-048 | Live Google OAuth consent, redirect, refresh/revoke, persistence, and disconnect | Pending | Mocked OAuth/token lifecycle tests exist | Pending; no live Google account was used |
+| JARVIS-049 | Live Home Assistant allowlist/control acceptance | Pending | Mocked upstream tests exist | Pending; no live instance/token/device was used |
+| JARVIS-050 | Live Telegram recipient/send/rate-limit acceptance | Pending | Mocked API/UI tests exist | Pending; no live bot/chat was used |
+| JARVIS-051 | Live Facebook Messenger recipient/window/send acceptance | Pending | Mocked API/UI tests exist | Pending; no live Meta Page/recipient was used |
+| JARVIS-052 | Physical microphone, speaker, camera, language, and interruption QA | Pending | Automated permission/voice/camera tests are not physical-device evidence | Pending |
+| JARVIS-053 | Target GPU/WebGL visual, context-loss, and reduced-motion QA | Pending | Local Chromium WebGL tests exist | Pending; no target GPU/device test |
+| JARVIS-054 | Decide disposition of byte-identical duplicate Messenger files | Pending | Duplicate source/test copy identified; no deletion or merge performed | Pending owner decision |
+| JARVIS-055 | Designate authoritative source branch and run CI on that exact source | Pending | Current nested source is untracked; `main` lacks the app; tracked candidate branches differ from this snapshot | Pending owner authorization and source/branch reconciliation |
 
-- Worktree source is currently untracked (`?? JARVIS-IronMan/`); branch HEAD contains only the repository-root `README.md`. The app's `.github/workflows/ci.yml` is nested under `JARVIS-IronMan/`, so GitHub will not discover it as a repository workflow in the current layout.
-- Direct `node --test` run: **383 passed, 1 failed test-file load**. `test/avatar3d.test.js` could not import the declared `three` dependency (`ERR_MODULE_NOT_FOUND`). This is a dependency/setup failure, not a confirmed avatar assertion failure.
-- Python unit tests: **17/17 passed**, using local mocks/loopback only.
-- Non-writing syntax checks: **137 JavaScript-family files and 188 Python files passed**.
-- Playwright was not run: `node_modules/.bin/playwright` is missing. `three` is also missing. `npm test`/`npm run check` were not used because their package hooks build and write `public/avatar3d.bundle.js`.
-- Android APK build was not run: `cargo`, `rustc`, `adb`, and `src-tauri/gen/android` are absent. Windows installer and GitHub Actions were not run.
-- No fresh `npm audit`, live integration test, browser/device acceptance, or independent penetration test was run. Existing completion/security documents contain older test counts and are not treated as fresh evidence.
+## Deduplication and snapshot comparison
 
-## Checklist
+- ZIP inventory: `JARVIS-final.zip` has 449 files. The current nested source has the same 449 relative paths; 445 are byte-identical and four differ: `README.md`, `package.json`, `browser/jarvis_browser_service.py`, and `test/browser_service_test.py`. No ZIP extraction or modification was performed.
+- Current source versus clean tracked `jarvis-linux-ci`: 31 shared files differ; the branch has three additional files (`.github/workflows/android-apk.yml`, `eslint.config.js`, `public/ascii-controls.js`) and the current snapshot has one generated bundle not tracked on that branch. The branch is not an exact CI result for the current snapshot.
+- `task/ai-integrations` is a later tracked branch, but its worktree has uncommitted changes and its manual dispatch workflow includes a secrets-backed live-check job. It was not used or run.
+- The four-file duplicate Messenger copy is represented by one owner-review task, JARVIS-054—not four extra implementation tasks.
+- `Jarvis_Provided_Code_Package` says it is an implementation sample, not the complete application; it is not counted as another JARVIS product snapshot.
+- Arbitrary shell/mouse/keyboard control, interactive browser actions, inbound messaging/WhatsApp/SMS, and continuous semantic video understanding are not implemented. Their requirements are not approved as current deliverables, so they are excluded from the percentage denominator rather than misreported as completed.
 
-| ID | Module / task | Status | Priority | Depends on | Evidence and remaining work |
-|---|---|---|---|---|---|
-| AUD-001 | Track the canonical app source on the branch | PENDING | P0 | — | `git status` shows `?? JARVIS-IronMan/`; branch HEAD has only root `README.md`. Stage/commit is deliberately outside this audit and requires separate authorization. |
-| AUD-002 | Activate repository-level CI for this layout | PENDING | P0 | AUD-001 | Workflow exists at `JARVIS-IronMan/.github/workflows/ci.yml`; GitHub Actions only discovers workflows under repository-root `.github/workflows/`. Add/review an appropriate root workflow before relying on CI. |
-| AUD-003 | Restore reproducible project dependencies in a clean validation environment | PENDING | P1 | AUD-001 | `three` and Playwright packages are unavailable in the current `node_modules`; do not overwrite existing dependencies without approval. |
-| AUD-004 | Obtain a fully green Node unit-test run | PARTIAL | P1 | AUD-003 | 383 of 384 test-runner results passed; the avatar test file failed to load because `three` is missing. Re-run after dependency restoration. |
-| AUD-005 | Python service tests | DONE | P2 | — | `python3 -m unittest discover -s test -p '*_test.py' -v`: 17/17 passed; tests use stubs and loopback. |
-| AUD-006 | JavaScript and Python syntax validation | DONE | P2 | — | `node --check`: 137 files; Python AST parse: 188 files; no syntax errors. |
-| AUD-007 | Desktop and mobile Playwright E2E | PENDING | P1 | AUD-003 | Browser spec files exist and external requests are blocked/mocked in test setup; the Playwright package was missing, so no current E2E result. |
-| AUD-008 | Fresh dependency vulnerability scan | PENDING | P1 | — | No `npm audit` was run in this audit. `SECURITY_AUDIT.md` records an older zero-finding scan; refresh it before release. |
-| AUD-009 | Run the complete repository CI workflow | PENDING | P1 | AUD-002, AUD-004, AUD-007, AUD-008 | No GitHub Actions run was triggered or inspected. |
-| AUD-010 | HTTP server, static assets, API routing, validation and error handling | DONE | P2 | — | `server.js`; server/auth/routing and related tests passed in the Node run. No external provider was contacted. |
-| AUD-011 | Original UI, dashboard, responsive layout and section navigation | PARTIAL | P1 | AUD-007 | `public/index.html`, `public/app.js`; navigation/mobile regression tests passed, but browser visual/E2E acceptance was unavailable. |
-| AUD-012 | English/Hindi preferences and UI localization | PARTIAL | P2 | AUD-007 | Conversation/search language handling and localization tests pass; README states interface labels and other sections remain English. |
-| AUD-013 | PWA manifest, install flow and offline app shell | PARTIAL | P2 | AUD-007 | Manifest/service-worker tests pass; actual browser installation and offline-on-device behavior were not exercised. |
-| AUD-014 | App Hub shortcuts, editing, search and URL Runner | DONE | P2 | — | `public/app-hub.js` and App Hub tests passed; native OS handoff remains platform-dependent. |
-| AUD-015 | Source-backed search and News & Briefing | PARTIAL | P2 | — | Result filtering/rendering tests passed; no live search provider or real headline source was checked. |
-| AUD-016 | Local conversation history, memory, notes, tasks and focus timer | DONE | P2 | — | Relevant history/memory/planner/timer unit tests passed; data remains browser-local. |
-| AUD-017 | Encrypted memory export/import | DONE | P2 | — | `public/memory-crypto.js`; encryption/import regression tests passed. No multi-device sync or recovery exists. |
-| AUD-018 | JARVIS Lab extensions, personalization and Code Studio | PARTIAL | P2 | — | Lab and safety tests passed; code is treated as untrusted text and arbitrary code execution is intentionally absent. End-to-end export/import was not browser-tested. |
-| AUD-019 | Local file manager and archive operations | DONE | P2 | — | File/archive tests passed; operations are browser-local and do not provide arbitrary host filesystem access. |
-| AUD-020 | Gemini text chat and provider settings | PARTIAL | P1 | — | Provider/server tests passed with mocks; no live Gemini request or credential was used. |
-| AUD-021 | OpenAI-compatible provider | PARTIAL | P1 | — | Mocked routing/configuration tests passed; endpoint compatibility and real provider response remain unverified. |
-| AUD-022 | Ollama provider and model selection | PARTIAL | P1 | — | Mocked provider tests passed; no local Ollama server/model was contacted. |
-| AUD-023 | Model discovery/probing and provider error redaction | PARTIAL | P2 | — | Unit/API tests passed; no live provider catalog or current dependency audit. |
-| AUD-024 | Single-image AI Vision API routing and limits | PARTIAL | P1 | — | Request validation/routing tests passed; no image was sent to a live AI provider. |
-| AUD-025 | Read-only Browser Research | PARTIAL | P1 | AUD-003 | Python tests verify public-IP validation, DNS pinning, proxy rejection of private destinations, and read-only action allowlist. Real browser navigation/subresource egress was not tested. |
-| AUD-026 | Interactive browser automation (click/type/forms) | PENDING | P2 | AUD-025 | Not implemented: Browser Research explicitly excludes interactive actions; only read-only page research is exposed. |
-| AUD-027 | Offline planner, permission broker, recovery and step verification | DONE | P2 | — | Planner/agent/permission/error-recovery tests passed; unsupported actions fail closed. |
-| AUD-028 | General mouse, keyboard, shell and arbitrary desktop control | PENDING | P2 | AUD-049 | Not exposed by design. Decide scope and safety model before adding; current typed actions are much narrower. |
-| AUD-029 | Server-side API authentication, CORS, request limits and secret redaction | DONE | P1 | — | `server.js` protections and Node regression tests passed; production requires `APP_ACCESS_TOKEN`. This is not a penetration-test result. |
-| AUD-030 | Browser speech recognition and speech-synthesis fallback | PARTIAL | P1 | AUD-007 | Speech lifecycle/error tests passed; browser support varies and no physical microphone/headset acceptance was performed. |
-| AUD-031 | Gemini Live streaming voice | PARTIAL | P1 | AUD-030 | Token/session/audio lifecycle code and tests exist; no key, live WebSocket, microphone, or device session was used. |
-| AUD-032 | Wake word, noise control, interruption and recovery | PARTIAL | P2 | AUD-030 | Unit tests cover lifecycle and recovery; always-on behavior, acoustic quality and privacy were not hardware-tested. |
-| AUD-033 | Optional OmniVoice TTS sidecar | PARTIAL | P2 | — | Python HTTP/stub tests passed. The real model is lazy-loaded and downloads several GB on first start; synthesis quality/performance was not verified. |
-| AUD-034 | 2D portrait, blink and approximate speech-mouth overlay | PARTIAL | P2 | AUD-007 | Assets and animation modules exist; unit tests passed. Pixel/visual browser checks were not run; lip movement is not phoneme-accurate. |
-| AUD-035 | Three.js avatar and local VRM/GLB loading | PARTIAL | P1 | AUD-003, AUD-007 | Renderer and validation code exist; `test/avatar3d.test.js` could not load without `three`; no WebGL/GPU or custom model acceptance. |
-| AUD-036 | Hologram shader and scene effects | PARTIAL | P2 | AUD-035 | `public/hologram-scene.js` implements scene/material effects; renderer tests and visual E2E could not be established in this environment. |
-| AUD-037 | Procedural holographic Earth renderer | PARTIAL | P2 | AUD-035 | `createHolographicGlobe()` builds a local procedural globe/orbits; its 3D tests were blocked by missing `three`. It is not live Earth imagery/data. |
-| AUD-038 | Geographic Earth data, location tracking or map navigation | PENDING | P2 | AUD-037 | No geographic data feed or location-based map-navigation feature was found; current Earth feature is a visual renderer. |
-| AUD-039 | User-approved single-frame screen/camera Vision flow | PARTIAL | P1 | AUD-024, AUD-007 | UI and unit tests cover consent, local preview, size limits and Emergency Stop. No physical capture/device acceptance. |
-| AUD-040 | Continuous Vision stream UI integration | PENDING | P2 | AUD-039 | `public/vision-stream.js` has a bounded helper and tests, but `public/app.js` does not import/connect it; UI exposes one-frame capture only. |
-| AUD-041 | Home Assistant entity status reads | PARTIAL | P1 | — | Server-side entity allowlist and mocked tests pass; no real Home Assistant server/token was configured. |
-| AUD-042 | Home Assistant light/switch control | PARTIAL | P1 | AUD-041 | Separate control allowlist, exact confirmation and post-action verification are implemented/tested; no live device action was performed. |
-| AUD-043 | Google OAuth/PKCE and encrypted token lifecycle | PARTIAL | P1 | — | Mocked tests cover single-use state, encryption, refresh and revocation; no real account, storage restart or deployment permissions were verified. |
-| AUD-044 | Gmail draft creation | PARTIAL | P1 | AUD-043 | Draft-only route and validation exist; no live Gmail test. Review `gmail.compose` scope because provider scope can permit more than the exposed draft action. |
-| AUD-045 | Calendar reads and confirmed event creation | PARTIAL | P1 | AUD-043 | Bounded range, confirmation and mocked API tests exist; no live calendar/account acceptance. |
-| AUD-046 | Telegram allowlisted text replies | PARTIAL | P1 | — | Numeric allowlist, confirmation, rate limit and mocked tests exist; no bot/chat was configured. |
-| AUD-047 | Facebook Messenger allowlisted replies | PARTIAL | P1 | — | Page token stays server-side; recipient allowlist, confirmation, rate limit and mocked tests exist; no live Meta Page/recipient check. |
-| AUD-048 | Electron shell, navigation isolation and narrow IPC | PARTIAL | P1 | AUD-004 | Context isolation, sandbox, origin checks and external-link allowlist are implemented; no Windows runtime/build test. |
-| AUD-049 | Bounded desktop actions (apps/folders/clipboard/notifications) | PARTIAL | P1 | AUD-048 | Typed allowlists, native per-action confirmation, audit and rate limiting exist; Windows/macOS/Linux behavior is not verified here. |
-| AUD-050 | Camera capture inside Electron | FAILED | P1 | AUD-048 | Vision UI exposes `Use camera`, but `desktop/main.js` denies media requests containing `video`; the Electron camera path cannot be granted by this handler. |
-| AUD-051 | Windows NSIS installer and release acceptance | PENDING | P1 | AUD-001, AUD-002, AUD-003 | Electron packaging config and a Windows CI job exist inside the nested source; no Windows build, artifact inspection, signing, install/update/uninstall test, or remote CI run. |
-| AUD-052 | Tauri native shell and remote API-base configuration | PARTIAL | P2 | — | Tauri config/Rust entrypoint and `runtime-config.js` exist; Android/desktop native runtime was not built or exercised. |
-| AUD-053 | Android APK build and device validation | PENDING | P1 | AUD-052 | No generated Android project, Rust/Cargo, or ADB toolchain was available; no APK or device test. |
-| AUD-054 | Android camera permission and Vision acceptance | PENDING | P2 | AUD-053 | Android setup script grants Internet/audio permissions but does not add `android.permission.CAMERA`; verify/fix before claiming camera support. |
-| AUD-055 | Native cleartext/network policy hardening | PARTIAL | P1 | AUD-052 | Android setup sets `usesCleartextTraffic="true"` globally; Tauri CSP permits broad HTTP(S)/WS(S). Restrict/document before production release. |
-| AUD-056 | Fresh security/dependency and release review | PENDING | P1 | AUD-008, AUD-009 | No current dependency scan, external security review, production configuration check, or penetration test in this audit. |
-| AUD-057 | Browser Research network-boundary verification | PARTIAL | P1 | AUD-007, AUD-025 | Unit tests exercise proxy/DNS guards; actual Chromium navigation, redirects and subresource egress remain unverified. |
-| AUD-058 | Reconcile stale progress/security documents | PENDING | P2 | AUD-004, AUD-007, AUD-008 | Existing matrices/report files cite earlier counts and E2E/audit results; refresh them from reproducible current evidence. |
-| AUD-059 | Correct the Full Access disclaimer for desktop actions | PARTIAL | P2 | AUD-049 | `public/index.html` says no desktop control is connected while Electron exposes approved desktop actions; align copy with actual platform behavior. |
+## Test evidence and limitations
 
-## Recommended next work
+Most recent local results on the audited nested source in this session:
 
-1. **P0:** After explicit approval, safely track the canonical source and make CI discoverable from the repository root; do not use broad staging.
-2. **P1:** Restore dependencies in a disposable/approved environment; get the Node suite fully green, run Playwright, refresh dependency audit, and then run CI.
-3. **P1:** Fix or explicitly hide Electron camera capture; verify Android camera permissions and build an APK on a supported toolchain.
-4. **P1:** Build and inspect the unsigned Windows installer, then test install/start/uninstall on Windows.
-5. **P1/P2:** Verify Browser Research egress boundaries and native cleartext policy; perform authorized live integration/device acceptance only when separately approved.
-6. **P2:** Connect or remove the continuous-Vision helper, decide whether geographic Earth navigation is in scope, finish UI localization, and reconcile stale progress documents.
+- Node: 410/410 passed.
+- Python: 17/17 passed. The older matrix says 15; it is stale relative to this run.
+- Playwright: 34/34 passed, using the local app and mocked routes.
+- `npm run check`: passed.
+- Combined local test pass rate: **461/461 = 100%**. This is a test-run pass rate, not live integration or device verification.
+- No live API, API credential, deployment, external penetration test, Windows installer run, or Android device test was used.
+- A prior Linux packaging attempt recorded in the older security report ended on upstream HTTP 504. It is not counted as a current source/test failure.
+
+## Exact counts and formulas
+
+| Metric | Calculation | Result |
+|---|---:|---:|
+| Total unique checklist tasks | IDs JARVIS-001 through JARVIS-055 | 55 |
+| Completed | Code/test-complete task rows | 35 |
+| Partial | Incomplete code/evidence rows | 7 |
+| Pending | Unimplemented or unrun acceptance/gov rows | 13 |
+| Failed | Current reproducible failures | 0 |
+| Code tasks | Implementation/configuration tasks, excluding live/device/release/governance gates | 41 |
+| Code completion | 35 / 41 | **85.37%** |
+| Full checklist completion | 35 / 55 | **63.64%** |
+| Remaining checklist work | (7 partial + 13 pending) / 55 | **36.36%** |
+| Real-world verification | 0 verified / 11 live, device, or independent-review gates | **0.00%** |
+| Automated test pass rate | 461 / 461 | **100.00%** |
+
+`Completed` rows can still have a linked pending real-world gate. For example, the code for Telegram sending is completed and mocked tests pass (JARVIS-039), while live Telegram acceptance remains pending (JARVIS-050). This is why code completion and real-world verification are not merged into one status.
+
+## Next 10 tasks, in priority order
+
+1. **JARVIS-055** — Owner-designate the authoritative source snapshot/branch; preserve the existing README deletion, ZIP, and untracked folder.
+2. **JARVIS-024** — Validate Browser Research redirect and subresource egress in a real browser/network boundary.
+3. **JARVIS-045** — Run a fresh dependency audit on the exact authorized source snapshot.
+4. **JARVIS-047** — Validate AI providers and Gemini Live with operator-owned test services.
+5. **JARVIS-048** — Validate the complete Google OAuth lifecycle with an authorized test account.
+6. **JARVIS-049** — Validate Home Assistant read/control allowlists against a dedicated test instance.
+7. **JARVIS-050** — Validate Telegram outbound controls using an operator-owned test bot.
+8. **JARVIS-051** — Validate Facebook Messenger with an operator-owned Meta Page/recipient.
+9. **JARVIS-042** — Build and smoke-test the Windows installer lifecycle on Windows.
+10. **JARVIS-044** — Build/install Android APK and test permissions/lifecycle on a supported device.
+
+No source, ZIP, or existing working feature was changed to create this checklist. This report is the only file added by this task.
